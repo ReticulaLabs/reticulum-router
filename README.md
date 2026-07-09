@@ -188,5 +188,8 @@ witnessed Reticulum network activity
 * [Nomad Network](https://unsigned.io/software/Nomad_Network.html) - A smol web based on lightweight web pages run over Reticulum
 * [MeshChatX](https://meshchatx.com) - A desktop all-in-one client supporting Chat, VoIP, and Nomad Network over Reticulum
 * [Columba](https://columba.network) - An Android, all-in-one client supporting Chat and VoIP
-~
-~
+
+# Projects exploring the Reticulum network
+
+* [RNS Map and Reliability Tracker](https://rns.fyi)
+* [RMAP](https://rmap.world)
