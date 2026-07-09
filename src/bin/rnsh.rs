@@ -465,7 +465,7 @@ impl Drop for RawTerm {
 
 struct Args {
     config: Option<String>, ident: Option<String>, svc: Option<String>,
-    listen: bool, verbose: u8, quiet: u8, print_ident: bool,
+    listen: bool, scan: bool, verbose: u8, quiet: u8, print_ident: bool,
     announce: Option<u64>, allowed: Vec<String>, no_auth: bool,
     remote_cmd_as_args: bool, no_remote_cmd: bool, no_id: bool,
     mirror: bool, timeout: Option<f64>, dest: Option<String>, cmd: Vec<String>,
@@ -474,10 +474,11 @@ struct Args {
 impl Args {
     fn empty() -> Self {
         Args {
-            config: None, ident: None, svc: None, listen: false, verbose: 0, quiet: 0,
-            print_ident: false, announce: None, allowed: vec![], no_auth: false,
-            remote_cmd_as_args: false, no_remote_cmd: false, no_id: false,
-            mirror: false, timeout: None, dest: None, cmd: vec![],
+            config: None, ident: None, svc: None, listen: false, scan: false,
+            verbose: 0, quiet: 0, print_ident: false, announce: None,
+            allowed: vec![], no_auth: false, remote_cmd_as_args: false,
+            no_remote_cmd: false, no_id: false, mirror: false,
+            timeout: None, dest: None, cmd: vec![],
         }
     }
 }
@@ -489,10 +490,11 @@ fn parse_args() -> RResult<Args> {
         None => (raw, vec![]),
     };
     let mut a = Args {
-        config: None, ident: None, svc: None, listen: false, verbose: 0, quiet: 0,
-        print_ident: false, announce: None, allowed: vec![], no_auth: false,
-        remote_cmd_as_args: false, no_remote_cmd: false, no_id: false,
-        mirror: false, timeout: None, dest: None, cmd,
+        config: None, ident: None, svc: None, listen: false, scan: false,
+        verbose: 0, quiet: 0, print_ident: false, announce: None,
+        allowed: vec![], no_auth: false, remote_cmd_as_args: false,
+        no_remote_cmd: false, no_id: false, mirror: false,
+        timeout: None, dest: None, cmd,
     };
     let mut it = mine.into_iter().peekable();
     while let Some(arg) = it.next() {
@@ -506,6 +508,7 @@ fn parse_args() -> RResult<Args> {
             "-i" | "--identity" => { a.ident = Some(next_val(&mut it, &arg)?); }
             "-s" | "--service" => { a.svc = Some(next_val(&mut it, &arg)?); }
             "-l" | "--listen" => { a.listen = true; }
+            "-S" | "--scan" => { a.scan = true; }
             "-v" | "--verbose" => { a.verbose += 1; }
             "-q" | "--quiet" => { a.quiet += 1; }
             "-p" | "--print-identity" => { a.print_ident = true; }
@@ -554,6 +557,8 @@ fn print_help() {
     eprintln!("  -N, --no-id               No identity announce");
     eprintln!("  -m, --mirror              Return remote exit code");
     eprintln!("  -w, --timeout <sec>       Timeout\n");
+    eprintln!("Scanner:");
+    eprintln!("  -S, --scan               Scan for announced rnsh destinations\n");
     eprintln!("Common:");
     eprintln!("  -i, --identity <path>     Identity file");
     eprintln!("  -p, --print-identity      Print identity");
@@ -597,7 +602,7 @@ async fn initiator(a: &Args) -> RResult<i32> {
     let dest_hash = AddressHash::new_from_hex_string(dest_hex)
         .map_err(|_| "invalid destination hash")?;
 
-    let timeout = a.timeout.unwrap_or(15.0);
+    let timeout = a.timeout.unwrap_or(30.0);
     let deadline = Instant::now() + Duration::from_secs_f64(timeout);
 
     // Resolve the listener's identity for link crypto verification.
@@ -1134,6 +1139,37 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
     Ok(())
 }
 
+// ── Scanner ─────────────────────────────────────────────────────────
+
+async fn scanner(a: &Args) -> RResult<()> {
+    let svc = a.svc.as_deref().unwrap_or("");
+    let ident = load_ident(a.ident.as_deref(), svc)?;
+    let transport = make_transport(ident.clone()).await?;
+    let mut rx = transport.recv_announces().await;
+    let rnsh_name = DestinationName::new(APP_NAME, "");
+
+    println!("Scanning for rnsh destinations...");
+    loop {
+        match rx.recv().await {
+            Ok(ev) => {
+                let dest = ev.destination.lock().await;
+                if dest.desc.name.as_name_hash_slice() != rnsh_name.as_name_hash_slice() {
+                    continue;
+                }
+                println!(
+                    "  {}  (identity {}, {} hops)",
+                    dest.desc.address_hash.to_hex_string(),
+                    dest.desc.identity.address_hash.to_hex_string(),
+                    ev.hops,
+                );
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(_) => break,
+        }
+    }
+    Ok(())
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -1162,6 +1198,14 @@ async fn main() {
                 println!("Listening on : {:?}", hash.to_hex_string());
             }
             Err(e) => { eprintln!("rnsh: {e}"); std::process::exit(1); }
+        }
+        return;
+    }
+
+    if a.scan {
+        if let Err(e) = scanner(&a).await {
+            eprintln!("rnsh: {e}");
+            std::process::exit(1);
         }
         return;
     }
