@@ -1,0 +1,16 @@
+# Reticulum shell service
+#
+# Allowed identities are loaded from ~/.config/rnsh/allowed_identities
+#
+# If a local reticulum-router isn't running with shared_instance enabled,
+# ensure ~/.config/reticulum/config.toml exists with at least one valid
+# Reticulum interface
+#
+[Unit]
+Description=A shell service for the Reticulum network.
+[Service]
+User="cooluser"
+Environment="RUST_LOG=info"
+ExecStart=/usr/bin/rnsh -l -- /bin/bash -l
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+[Unit]
+Description=A transport/routing daemon for the Reticulum network.
+[Service]
+ExecStart=/usr/bin/reticulum-router
+[Install]
+WantedBy=multi-user.target
