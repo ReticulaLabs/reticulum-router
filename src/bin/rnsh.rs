@@ -602,10 +602,17 @@ async fn initiator(a: &Args) -> RResult<i32> {
 
     // Resolve the listener's identity for link crypto verification.
     // The correct identity comes from the destination's announce, which
-    // propagates through the Reticulum network. On same-host setups where
-    // both rnsh instances connect to the same daemon via TCP, announces
-    // don't propagate between clients, so we fall back to loading the
-    // identity from the local identity file (same file = same keys).
+    // propagates through the Reticulum network. If the announce hasn't
+    // arrived yet (e.g. the shared instance doesn't replay cached
+    // announces to new clients), proactively request it via a path
+    // request.  On same-host setups where both rnsh instances connect to
+    // the same daemon via TCP, announces don't propagate between clients,
+    // so we fall back to loading the identity from the local identity file
+    // (same file = same keys).
+    //
+    // Kick off the first path request immediately so we don't waste a
+    // full sleep cycle before starting discovery.
+    transport.request_path(&dest_hash, None, None).await;
     let remote_identity = 'ident: loop {
         if let Some(dest) = transport.get_out_destination(&dest_hash).await {
             let identity = dest.lock().await.desc.identity;
@@ -615,7 +622,8 @@ async fn initiator(a: &Args) -> RResult<i32> {
         if Instant::now() >= deadline {
             break 'ident resolve_listener_identity(a.ident.as_deref(), svc).await;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        transport.request_path(&dest_hash, None, None).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     };
 
     let dest_desc = DestinationDesc {
