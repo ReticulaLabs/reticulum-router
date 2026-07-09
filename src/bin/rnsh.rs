@@ -165,10 +165,20 @@ fn load_allowed() -> Vec<AddressHash> {
 async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
     let mut tcfg = TransportConfig::new("rnsh", &id, false);
     tcfg.set_respond_to_probes(true);
+    tcfg.set_share_instance(true);
     let t = Transport::new(tcfg);
+    let on_shared = t.is_connected_to_shared_instance().await;
     let mgr = t.iface_manager();
 
-    // Try loading interfaces from the Reticulum config
+    if on_shared {
+        log::info!("rnsh: connected to local reticulum shared instance");
+        return Ok(t);
+    }
+
+    // Load explicit interfaces from the Reticulum config only when
+    // running standalone (no shared instance). When connected to a
+    // running daemon via the shared instance, the daemon already
+    // manages all network connectivity.
     if let Some(cfg) = load_cfg() {
         log::info!("rnsh: loading interfaces from reticulum config");
         for iface in &cfg.interfaces {
@@ -200,22 +210,11 @@ async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
                     );
                 }
                 CfgIfaceType::AutoInterface {} => log::warn!("rnsh: AutoInterface unsupported"),
-                CfgIfaceType::Unsupported => log::warn!("rnsh: unsupported interface"),
+                CfgIfaceType::Unsupported => log::warn!("rnsh: skipping unsupported interface"),
             }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-
-    // Always try to reach a local daemon through its default TCP server.
-    // This is the standard way for multiple Reticulum instances on the same
-    // host to communicate: one runs a TCP server, others connect as clients.
-    let daemon_addr = "127.0.0.1:4242";
-    log::info!("rnsh: connecting to local daemon at {daemon_addr}");
-    let _ = mgr.lock().await.spawn(
-        reticulum_sdk::iface::tcp_client::TcpClient::new(daemon_addr.to_string()),
-        reticulum_sdk::iface::tcp_client::TcpClient::spawn,
-    );
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     Ok(t)
 }
