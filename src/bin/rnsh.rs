@@ -890,7 +890,7 @@ fn check_allowed(id: &Identity, a: &Args) -> bool {
         .filter_map(|h| AddressHash::new_from_hex_string(h).ok())
         .chain(load_allowed())
         .collect();
-    if allowed.is_empty() { return true; }
+    if allowed.is_empty() { return false; }
     allowed.contains(&id.address_hash)
 }
 
