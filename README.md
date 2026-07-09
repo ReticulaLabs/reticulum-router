@@ -4,6 +4,12 @@
 
 A pure, rust-based transport for the Reticulum network based largely on [reticulum-sdk](https://github.com/GhostMeshLabs/reticulum-sdk)
 
+## What is Reticulum?
+
+Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Python](https://github.com/markqvist/Reticulum). Reticulum nodes transport packets across a sea of instances of varying, indeterminate physical medias.
+
+<img src="docs/infographic.png" width=512>
+
 ## Components
 
 ### Transport daemon
