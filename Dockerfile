@@ -1,14 +1,15 @@
-FROM docker.io/rust:alpine3.23 as BUILD
+FROM docker.io/rust:alpine3.24 as BUILD
 RUN mkdir -p /tmp/src && apk update && apk add protobuf
 COPY . /tmp/src
 WORKDIR /tmp/src
 RUN cargo build -r
 
 
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 COPY --from=BUILD /tmp/src/target/release/reticulum-router /usr/local/bin/reticulum-router
 COPY --from=BUILD /tmp/src/target/release/rnid /usr/local/bin/rnid
 COPY --from=BUILD /tmp/src/target/release/rnpath /usr/local/bin/rnpath
+COPY --from=BUILD /tmp/src/target/release/rnsh /usr/local/bin/rnsh
 ENTRYPOINT "/usr/local/bin/reticulum-router"
 EXPOSE 4242/tcp
 EXPOSE 4242/udp
