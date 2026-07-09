@@ -114,6 +114,20 @@ target_host = "rns.atx.ghostmesh.net"
 target_port = 4242
 ```
 
+## Log verbosity
+
+All tools and daemons support the RUST_LOG environment variable to set the log verbosity
+
+```RUST_LOG=trace rnsh ...```
+
+### Log Levels
+
+* error -- Only critical errors
+* warn -- All of the above and non-critical events
+* info -- All of the above and informational events
+* debug -- All of the above and debugging information
+* trace -- All of the above and traces of every packet
+
 # Installing
 
 ## Compiling Source Code
