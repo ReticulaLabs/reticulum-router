@@ -601,13 +601,22 @@ async fn initiator(a: &Args) -> RResult<i32> {
     let deadline = Instant::now() + Duration::from_secs_f64(timeout);
 
     // Resolve the listener's identity for link crypto verification.
-    // Ideally this comes from an announce, but on same-host setups where
+    // The correct identity comes from the destination's announce, which
+    // propagates through the Reticulum network. On same-host setups where
     // both rnsh instances connect to the same daemon via TCP, announces
-    // don't propagate between clients. As a fallback, construct the
-    // identity from the local identity file (same identity = same keys).
-    let remote_identity = resolve_listener_identity(
-        a.ident.as_deref(), svc,
-    ).await;
+    // don't propagate between clients, so we fall back to loading the
+    // identity from the local identity file (same file = same keys).
+    let remote_identity = 'ident: loop {
+        if let Some(dest) = transport.get_out_destination(&dest_hash).await {
+            let identity = dest.lock().await.desc.identity;
+            log::info!("rnsh: resolved destination identity from announce");
+            break 'ident identity;
+        }
+        if Instant::now() >= deadline {
+            break 'ident resolve_listener_identity(a.ident.as_deref(), svc).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
 
     let dest_desc = DestinationDesc {
         identity: remote_identity,
