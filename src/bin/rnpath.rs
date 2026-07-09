@@ -412,7 +412,22 @@ fn do_table(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
         let expires_str = pretty_duration(expires_secs);
 
         let hop_str = if hops == 1 { " hop" } else { " hops" };
-        println!("{hash_str} is {hops}{hop_str} away via {via_str} on {iface_str} expires {expires_str}");
+        print!("{hash_str} is {hops}{hop_str} away via {via_str} on {iface_str} expires {expires_str}");
+
+        // Render first-hop radio signal if relevant
+        let snr = fetch_snr(stream).unwrap_or(None);
+        let rssi = fetch_rssi(stream).unwrap_or(None);
+        if snr.is_some() || rssi.is_some() {
+            print!(" (via radio: ");
+            if let Some(snr_value) = snr {
+                print!("SNR: {snr_value:.1} dB");
+            }
+            if let Some(rssi_value) = rssi {
+                print!("RSSI: {rssi_value} dBm");
+            }
+            print!(")");
+        }
+        print!("\n");
     }
 
     if displayed == 0 && dest_filter.is_some() {
@@ -685,13 +700,28 @@ fn do_path_info(stream: &mut TcpStream, dest: &str, args: &Args) -> Result<i32, 
         let hop_str = if hops == 1 { " hop" } else { " hops" };
         if let Some(nh) = next_hop {
             let iface_str = iface.map(pretty_hex).unwrap_or_else(|| "?".to_string());
-            println!(
+            print!(
                 "Path found, destination is {hops}{hop_str} away via {} on {iface_str}",
                 pretty_hex(nh),
             );
         } else {
-            println!("Path found, destination is {hops}{hop_str} away");
+            print!("Path found, destination is {hops}{hop_str} away");
         }
+
+        // Render first-hop radio signal if relevant
+        let snr = fetch_snr(stream).unwrap_or(None);
+        let rssi = fetch_rssi(stream).unwrap_or(None);
+        if snr.is_some() || rssi.is_some() {
+            print!(" (via radio: ");
+            if let Some(snr_value) = snr {
+                print!("SNR: {snr_value:.1} dB");
+            }
+            if let Some(rssi_value) = rssi {
+                print!("RSSI: {rssi_value} dBm");
+            }
+            print!(")");
+        }
+        print!("\n");
         Ok(0)
     } else {
         println!("No path known");
@@ -729,6 +759,22 @@ fn map_get_str<'a>(map: &'a [(Value, Value)], key: &str) -> Option<&'a str> {
     map.iter().find_map(|(k, v)| {
         if k.as_str() == Some(key) { v.as_str() } else { None }
     })
+}
+
+fn fetch_snr(stream: &mut TcpStream) -> Result<Option<f64>, String> {
+    let request = Value::Map(vec![
+        (Value::from("get"), Value::from("packet_snr")),
+    ]);
+    let response = send_rpc_request(stream, &request)?;
+    Ok(response.as_f64())
+}
+
+fn fetch_rssi(stream: &mut TcpStream) -> Result<Option<i64>, String> {
+    let request = Value::Map(vec![
+        (Value::from("get"), Value::from("packet_rssi")),
+    ]);
+    let response = send_rpc_request(stream, &request)?;
+    Ok(response.as_i64())
 }
 
 fn path_entry_to_json(entry: &Value) -> Option<serde_json::Value> {
