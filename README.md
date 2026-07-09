@@ -4,6 +4,25 @@
 
 A pure, rust-based transport for the Reticulum network based largely on [reticulum-sdk](https://github.com/GhostMeshLabs/reticulum-sdk)
 
+## Components
+
+### Transport daemon
+
+* `reticulum-router` - Transport Daemon
+  * A fast transport daemon for all your Reticulum transport / routing needs
+
+### Utilities
+
+> All tools will prefer using a local running `reticulum-router` instance via the share_instance RPC port.
+> However, `rnsh` will fallback to connecting to the Reticulum network directly (based on the standard configuration file) preventing the need to deploy reticulum-router on all endpoints.
+
+* `rnid` - Identity Management
+  * Manage your local Reticulum identities
+* `rnpath` - Network Path Queries
+  * Ask the network for a path to a Reticulum destination
+* `rnsh` - Shell over Reticulum (like ssh, but over the mesh)
+  * Shell service for the Reticulum network. Listens for connections over Reticulum, or initiate connections to remote rnsh destinations
+
 ## Implemented protocol features
 
 * ✅ rnstransport path.request
