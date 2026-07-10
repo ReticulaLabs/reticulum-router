@@ -26,6 +26,8 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
   * Manage your local Reticulum identities
 * `rnpath` - Network Path Queries
   * Ask the network for a path to a Reticulum destination
+* `rnperf` - Reticulum bandwidth tester (like iperf, but over the mesh)
+  * Client / Server to test real-world link bandwidth between two points on the network.
 * `rnsh` - Shell over Reticulum (like ssh, but over the mesh)
   * Shell service for the Reticulum network. Listens for connections over Reticulum, or initiate connections to remote rnsh destinations
 

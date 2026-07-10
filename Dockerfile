@@ -9,6 +9,7 @@ FROM docker.io/alpine:3.24
 COPY --from=BUILD /tmp/src/target/release/reticulum-router /usr/local/bin/reticulum-router
 COPY --from=BUILD /tmp/src/target/release/rnid /usr/local/bin/rnid
 COPY --from=BUILD /tmp/src/target/release/rnpath /usr/local/bin/rnpath
+COPY --from=BUILD /tmp/src/target/release/rnpath /usr/local/bin/rnperf
 COPY --from=BUILD /tmp/src/target/release/rnsh /usr/local/bin/rnsh
 ENTRYPOINT "/usr/local/bin/reticulum-router"
 EXPOSE 4242/tcp
