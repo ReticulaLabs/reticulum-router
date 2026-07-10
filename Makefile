@@ -1,5 +1,5 @@
 ENGINE=?podman
-REPO=ghcr.io/ghostmeshlabs
+REPO=ghcr.io/reticulalabs
 TAG=`cat VERSION`
 
 default:
