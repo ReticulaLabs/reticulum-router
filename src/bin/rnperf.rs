@@ -450,40 +450,49 @@ async fn handle_session(
     let mut bytes_received: u64 = 0;
     let mut packets_received: u64 = 0;
     let mut first_data_time: Option<Instant> = None;
+    let session_deadline = Instant::now() + Duration::from_secs_f64(test_duration + 15.0);
 
     loop {
-        match in_ev.recv().await {
-            Ok(ev) if ev.id == link_id => match &ev.event {
-                LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_DATA => {
-                    if ch.payload.len() >= 4 {
-                        let data_bytes = (ch.payload.len() - 4) as u64;
-                        bytes_received += data_bytes;
-                        packets_received += 1;
-                        if first_data_time.is_none() {
-                            first_data_time = Some(Instant::now());
+        tokio::select! {
+            result = in_ev.recv() => {
+                match result {
+                    Ok(ev) if ev.id == link_id => match &ev.event {
+                        LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_DATA => {
+                            if ch.payload.len() >= 4 {
+                                let data_bytes = (ch.payload.len() - 4) as u64;
+                                bytes_received += data_bytes;
+                                packets_received += 1;
+                                if first_data_time.is_none() {
+                                    first_data_time = Some(Instant::now());
+                                }
+                            }
                         }
+                        LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_RESULT => {
+                            // Initiator requested results: send back our stats
+                            let recv_duration_ns = match first_data_time {
+                                Some(t0) => Instant::now().duration_since(t0).as_nanos() as u64,
+                                None => Duration::from_secs_f64(test_duration).as_nanos() as u64,
+                            };
+                            let result = pack_result(bytes_received, packets_received, recv_duration_ns);
+                            send_channel(&link_arc, &transport, MSG_TYPE_RESULT, &result).await?;
+                            log::info!("rnperf: test complete: received {packets_received} packets, {bytes_received} bytes");
+                            break;
+                        }
+                        LinkEvent::Closed => break,
+                        _ => {}
+                    },
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("rnperf: data receiver lagged ({n} missed)");
+                        continue;
                     }
+                    Err(_) => break,
                 }
-                LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_RESULT => {
-                    // Initiator requested results: send back our stats
-                    let recv_duration_ns = match first_data_time {
-                        Some(t0) => Instant::now().duration_since(t0).as_nanos() as u64,
-                        None => Duration::from_secs_f64(test_duration).as_nanos() as u64,
-                    };
-                    let result = pack_result(bytes_received, packets_received, recv_duration_ns);
-                    send_channel(&link_arc, &transport, MSG_TYPE_RESULT, &result).await?;
-                    log::info!("rnperf: test complete: received {packets_received} packets, {bytes_received} bytes");
-                    break;
-                }
-                LinkEvent::Closed => break,
-                _ => {}
-            },
-            Ok(_) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                log::warn!("rnperf: data receiver lagged ({n} missed)");
-                continue;
             }
-            Err(_) => break,
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(session_deadline)) => {
+                log::info!("rnperf: session timed out after {test_duration}s, received {packets_received} packets, {bytes_received} bytes");
+                break;
+            }
         }
     }
 
@@ -622,7 +631,12 @@ async fn initiator(a: &Args) -> RResult<()> {
     let mut total_bytes_sent: u64 = 0;
     let mut total_packets_sent: u64 = 0;
 
+    // Cap send rate at 5 Gbps to avoid overwhelming the transport
+    // burst_sleep = (burst_size * data_size * 8) / 5 nanoseconds
     let burst_size: u64 = 100;
+    let burst_sleep = Duration::from_nanos(burst_size * data_size as u64 * 8 / 5);
+    let mut burst_start = Instant::now();
+
     while Instant::now() < send_deadline {
         data_buf[..4].copy_from_slice(&seq.to_be_bytes());
         send_channel(&link_arc, &transport, MSG_TYPE_DATA, &data_buf).await?;
@@ -631,7 +645,11 @@ async fn initiator(a: &Args) -> RResult<()> {
         seq = seq.wrapping_add(1);
 
         if total_packets_sent % burst_size == 0 {
-            tokio::time::sleep(Duration::from_micros(100)).await;
+            let elapsed = burst_start.elapsed();
+            if elapsed < burst_sleep {
+                tokio::time::sleep(burst_sleep - elapsed).await;
+            }
+            burst_start = Instant::now();
         }
     }
     let send_elapsed = start.elapsed();
@@ -650,33 +668,45 @@ async fn initiator(a: &Args) -> RResult<()> {
     let mut recv_duration_ns: u64 = 0;
     let mut got_result = false;
     let result_deadline = Instant::now() + Duration::from_secs(30);
+    let mut retry_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(3),
+        Duration::from_secs(3),
+    );
 
     while Instant::now() < result_deadline {
-        match out_ev.recv().await {
-            Ok(ev) if ev.id == link_id => match &ev.event {
-                LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_RESULT => {
-                    if let Ok((br, bp, dn)) = unpack_result(&ch.payload) {
-                        recv_bytes = br;
-                        recv_packets = bp;
-                        recv_duration_ns = dn;
-                        got_result = true;
-                        break;
+        tokio::select! {
+            result = out_ev.recv() => {
+                match result {
+                    Ok(ev) if ev.id == link_id => match &ev.event {
+                        LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_RESULT => {
+                            if let Ok((br, bp, dn)) = unpack_result(&ch.payload) {
+                                recv_bytes = br;
+                                recv_packets = bp;
+                                recv_duration_ns = dn;
+                                got_result = true;
+                                break;
+                            }
+                        }
+                        LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_ERROR => {
+                            let m = ch.payload.iter().map(|&b| b as char).collect::<String>();
+                            log::error!("rnperf: remote error: {m}");
+                            break;
+                        }
+                        LinkEvent::Closed => break,
+                        _ => {}
+                    },
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("rnperf: result receiver lagged ({n} missed)");
+                        continue;
                     }
+                    Err(_) => break,
                 }
-                LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_ERROR => {
-                    let m = ch.payload.iter().map(|&b| b as char).collect::<String>();
-                    log::error!("rnperf: remote error: {m}");
-                    break;
-                }
-                LinkEvent::Closed => break,
-                _ => {}
-            },
-            Ok(_) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                log::warn!("rnperf: result receiver lagged ({n} missed)");
-                continue;
             }
-            Err(_) => break,
+            _ = retry_interval.tick() => {
+                log::warn!("rnperf: result not yet received, retrying request");
+                send_channel(&link_arc, &transport, MSG_TYPE_RESULT, &pack_result_request()).await?;
+            }
         }
     }
 
