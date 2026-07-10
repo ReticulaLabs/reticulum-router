@@ -1128,9 +1128,9 @@ dependencies = [
 
 [[package]]
 name = "reticulum-sdk"
-version = "2.1.8"
+version = "2.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33fefa712bf61529b971ea8725c787a93838ea24219097f8002751710c6f60f1"
+checksum = "587927847c38466db9a3abe83e9780a17d4e0f4379f93f911cb2d36e8df7f904"
 dependencies = [
  "aes",
  "cbc",
