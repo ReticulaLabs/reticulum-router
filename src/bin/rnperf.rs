@@ -378,6 +378,10 @@ async fn listener(a: &Args) -> RResult<()> {
                 });
             }
             Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                log::warn!("rnperf: main loop lagged ({} missed)", n);
+                continue;
+            }
             Err(_) => break,
         }
     }
@@ -618,12 +622,17 @@ async fn initiator(a: &Args) -> RResult<()> {
     let mut total_bytes_sent: u64 = 0;
     let mut total_packets_sent: u64 = 0;
 
+    let burst_size: u64 = 100;
     while Instant::now() < send_deadline {
         data_buf[..4].copy_from_slice(&seq.to_be_bytes());
         send_channel(&link_arc, &transport, MSG_TYPE_DATA, &data_buf).await?;
         total_bytes_sent += data_size as u64;
         total_packets_sent += 1;
         seq = seq.wrapping_add(1);
+
+        if total_packets_sent % burst_size == 0 {
+            tokio::time::sleep(Duration::from_micros(100)).await;
+        }
     }
     let send_elapsed = start.elapsed();
 
