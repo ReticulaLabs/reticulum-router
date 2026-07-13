@@ -30,6 +30,8 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
   * Client / Server to test real-world link bandwidth between two points on the network.
 * `rnsh` - Shell over Reticulum (like ssh, but over the mesh)
   * Shell service for the Reticulum network. Listens for connections over Reticulum, or initiate connections to remote rnsh destinations
+* `rnpage` - NomadNet page server
+  * Announces and serves documents such as [Micron](https://github.com/RFnexus/micron-parser-js) pages over Reticulum
 
 ## Implemented protocol features
 
