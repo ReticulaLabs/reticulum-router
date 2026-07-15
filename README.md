@@ -60,6 +60,7 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
 * ❌ AX25KISSInterface
 * ✅ [Modem73Interface](https://github.com/RFnexus/modem73)
 * ✅ [RNodeInterface](https://unsigned.io/rnode/) (over Serial)
+* ✅ LoRaInterface (over SPI, SX126X or LR1121)
 * ❌ RNodeMultiInterface
 * ❌ KISSInterface
 
@@ -136,6 +137,18 @@ control_host = "127.0.0.1"
 control_port = 8073
 
 [[interfaces]]
+name = "LoRa via SPI"
+type = "LoRaInterface"
+enabled = true
+chipset = "SX1262"
+spi_path = "/dev/spidev0.0"
+frequency = 914875000
+bandwidth = 125000.0
+txpower = 14
+spreadingfactor = 12
+codingrate = 5
+
+[[interfaces]]
 name = "GhostMesh 👻 ATX (IPv4,IPv6,LoRA)"
 type = "TCPClientInterface"
 enabled = true
@@ -171,8 +184,8 @@ $ cargo build --release
 > Linux, Alpine based x86_64 and aarch64 containers are available
 
 ```
-docker pull ghcr.io/reticulalabs/reticulum-router:v1.7.6
-docker run -v reticulum_data:/root/.config/reticulum ghcr.io/reticulalabs/reticulum-router:v1.7.6
+docker pull ghcr.io/reticulalabs/reticulum-router:v1.8.0
+docker run -v reticulum_data:/root/.config/reticulum ghcr.io/reticulalabs/reticulum-router:v1.8.0
 ```
 
 /root/.config/reticulum will contain the following files:

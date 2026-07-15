@@ -5,6 +5,9 @@ use rand::rngs::OsRng;
 use reticulum_sdk::hash::AddressHash;
 use reticulum_sdk::identity::PrivateIdentity;
 use reticulum_sdk::iface::modem73::Modem73Interface;
+use reticulum_sdk::iface::lora::lr1121::LR1121;
+use reticulum_sdk::iface::lora::sx1262::SX1262;
+use reticulum_sdk::iface::lora::{LoRaConfig, LoRaInterface};
 use reticulum_sdk::iface::rnode::{RNodeConfig, RNodeInterface};
 use reticulum_sdk::iface::tcp_client::TcpClient;
 use reticulum_sdk::iface::tcp_server::TcpServer;
@@ -137,6 +140,7 @@ impl Daemon {
                 InterfaceConfig::KISSInterface { enabled, .. } => *enabled,
                 InterfaceConfig::AX25KISSInterface { enabled, .. } => *enabled,
                 InterfaceConfig::Modem73Interface { enabled, .. } => *enabled,
+                InterfaceConfig::LoRaInterface { enabled, .. } => *enabled,
                 InterfaceConfig::Unsupported => false,
             };
 
@@ -336,6 +340,83 @@ impl Daemon {
                         Modem73Interface::new(target_addr, control_addr),
                         Modem73Interface::spawn,
                     );
+                }
+                InterfaceConfig::LoRaInterface {
+                    chipset,
+                    spi_path,
+                    gpio_chip,
+                    busy_line,
+                    reset_line,
+                    dio1_line,
+                    frequency,
+                    bandwidth,
+                    txpower,
+                    spreadingfactor,
+                    codingrate,
+                    sync_word,
+                    preamble_length,
+                    crc_enabled,
+                    implicit_header,
+                    iq_inverted,
+                    dio2_rf_switch,
+                    tcxo_voltage,
+                    spi_speed,
+                    flow_control,
+                    ..
+                } => {
+                    let mut lora_config = LoRaConfig::new(
+                        spi_path,
+                        frequency,
+                        bandwidth,
+                        txpower,
+                        spreadingfactor,
+                        codingrate,
+                    );
+                    lora_config.gpio_chip = gpio_chip;
+                    lora_config.busy_line = busy_line;
+                    lora_config.reset_line = reset_line;
+                    lora_config.dio1_line = dio1_line;
+                    lora_config.sync_word = sync_word;
+                    lora_config.preamble_length = preamble_length;
+                    lora_config.crc_enabled = crc_enabled;
+                    lora_config.implicit_header = implicit_header;
+                    lora_config.iq_inverted = iq_inverted;
+                    lora_config.dio2_rf_switch = dio2_rf_switch;
+                    lora_config.tcxo_voltage = tcxo_voltage;
+                    lora_config.spi_speed = spi_speed;
+                    lora_config.flow_control = flow_control;
+                    lora_config.validate()?;
+
+                    log::info!(
+                        "Enabling interface '{}': LoRa ({}) on {} @ {} Hz",
+                        iface.name,
+                        chipset,
+                        lora_config.spi_path,
+                        lora_config.frequency,
+                    );
+
+                    match chipset.as_str() {
+                        "SX1262" => {
+                            iface_manager.lock().await.spawn(
+                                LoRaInterface::<SX1262>::new(lora_config),
+                                LoRaInterface::<SX1262>::spawn,
+                            );
+                        }
+                        "LR1121" => {
+                            iface_manager.lock().await.spawn(
+                                LoRaInterface::<LR1121>::new(lora_config),
+                                LoRaInterface::<LR1121>::spawn,
+                            );
+                        }
+                        _ => {
+                            log::error!(
+                                "Interface '{}': unknown LoRa chipset '{}'",
+                                iface.name,
+                                chipset,
+                            );
+                            continue;
+                        }
+                    }
                 }
                 InterfaceConfig::AutoInterface { .. } => {
                     log::warn!(

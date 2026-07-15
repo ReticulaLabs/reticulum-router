@@ -184,6 +184,43 @@ pub enum InterfaceConfig {
         control_host: String,
         control_port: u32,
     },
+    LoRaInterface {
+        #[serde(default = "default_true", alias = "interface_enabled")]
+        enabled: bool,
+        chipset: String,
+        spi_path: String,
+        #[serde(default)]
+        gpio_chip: Option<String>,
+        #[serde(default)]
+        busy_line: Option<u32>,
+        #[serde(default)]
+        reset_line: Option<u32>,
+        #[serde(default)]
+        dio1_line: Option<u32>,
+        frequency: u64,
+        bandwidth: f64,
+        txpower: i8,
+        spreadingfactor: u8,
+        codingrate: u8,
+        #[serde(default = "default_sync_word")]
+        sync_word: u16,
+        #[serde(default = "default_preamble_length")]
+        preamble_length: u16,
+        #[serde(default = "default_true")]
+        crc_enabled: bool,
+        #[serde(default)]
+        implicit_header: bool,
+        #[serde(default)]
+        iq_inverted: bool,
+        #[serde(default)]
+        dio2_rf_switch: bool,
+        #[serde(default)]
+        tcxo_voltage: Option<f64>,
+        #[serde(default = "default_spi_speed")]
+        spi_speed: u32,
+        #[serde(default)]
+        flow_control: bool,
+    },
     #[serde(other)]
     Unsupported,
 }
@@ -251,6 +288,15 @@ fn default_metrics_collection_timeout_seconds() -> u64 {
 }
 fn default_metrics_request_timeout_seconds() -> u64 {
     2
+}
+fn default_sync_word() -> u16 {
+    0x1424
+}
+fn default_preamble_length() -> u16 {
+    8
+}
+fn default_spi_speed() -> u32 {
+    4_000_000
 }
 
 impl Default for ReticulumConfig {
@@ -350,6 +396,8 @@ impl Config {
                 converted = quote_if_needed(&converted, "callsign");
                 converted = quote_if_needed(&converted, "parity");
                 converted = quote_if_needed(&converted, "transport_identity");
+                converted = quote_if_needed(&converted, "spi_path");
+                converted = quote_if_needed(&converted, "chipset");
             }
 
             output.push_str(&converted);
