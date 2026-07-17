@@ -314,10 +314,25 @@ impl Daemon {
                     );
                     //rnode_config.with_flow_control(flow_control);
                     rnode_config.validate()?;
-                    iface_manager
+                    let iface_addr = iface_manager
                         .lock()
                         .await
                         .spawn(RNodeInterface::new(rnode_config), RNodeInterface::spawn);
+                    if iface.discoverable {
+                        let mut discovery_config = DiscoveryInterfaceConfig::rnode(
+                            &iface.name,
+                            frequency,
+                            bandwidth,
+                            spreadingfactor,
+                            codingrate,
+                        );
+                        discovery_config.height = iface.height;
+                        discovery_config.latitude = iface.latitude;
+                        discovery_config.longitude = iface.longitude;
+                        transport
+                            .register_discoverable_interface(iface_addr, discovery_config)
+                            .await;
+                    }
                 }
                 InterfaceConfig::Modem73Interface {
                     target_host,
@@ -393,25 +408,19 @@ impl Daemon {
                         lora_config.frequency,
                     );
 
-                    match chipset.as_str() {
-                        "SX1276" => {
-                            iface_manager.lock().await.spawn(
-                                LoRaInterface::<SX1276>::new(lora_config),
-                                LoRaInterface::<SX1276>::spawn,
-                            );
-                        }
-                        "SX1262" => {
-                            iface_manager.lock().await.spawn(
-                                LoRaInterface::<SX1262>::new(lora_config),
-                                LoRaInterface::<SX1262>::spawn,
-                            );
-                        }
-                        "LR1121" => {
-                            iface_manager.lock().await.spawn(
-                                LoRaInterface::<LR1121>::new(lora_config),
-                                LoRaInterface::<LR1121>::spawn,
-                            );
-                        }
+                    let iface_addr = match chipset.as_str() {
+                        "SX1276" => iface_manager.lock().await.spawn(
+                            LoRaInterface::<SX1276>::new(lora_config),
+                            LoRaInterface::<SX1276>::spawn,
+                        ),
+                        "SX1262" => iface_manager.lock().await.spawn(
+                            LoRaInterface::<SX1262>::new(lora_config),
+                            LoRaInterface::<SX1262>::spawn,
+                        ),
+                        "LR1121" => iface_manager.lock().await.spawn(
+                            LoRaInterface::<LR1121>::new(lora_config),
+                            LoRaInterface::<LR1121>::spawn,
+                        ),
                         _ => {
                             log::error!(
                                 "Interface '{}': unknown LoRa chipset '{}'",
@@ -420,6 +429,21 @@ impl Daemon {
                             );
                             continue;
                         }
+                    };
+                    if iface.discoverable {
+                        let mut discovery_config = DiscoveryInterfaceConfig::lora(
+                            &iface.name,
+                            frequency,
+                            bandwidth,
+                            spreadingfactor,
+                            codingrate,
+                        );
+                        discovery_config.height = iface.height;
+                        discovery_config.latitude = iface.latitude;
+                        discovery_config.longitude = iface.longitude;
+                        transport
+                            .register_discoverable_interface(iface_addr, discovery_config)
+                            .await;
                     }
                 }
                 InterfaceConfig::AutoInterface { .. } => {
