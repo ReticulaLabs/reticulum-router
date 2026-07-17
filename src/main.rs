@@ -634,6 +634,18 @@ fn render_prometheus_metrics(
             "reticulum_transport_interface_announce_queue_length{{interface=\"{}\"}} {}\n",
             interface, iface.announce
         ));
+        output.push_str(&format!(
+            "reticulum_transport_interface_packets_sent_total{{interface=\"{}\"}} {}\n",
+            interface, iface.packets_tx
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_interface_pacing_wait_microseconds_total{{interface=\"{}\"}} {}\n",
+            interface, iface.pacing_wait_us
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_interface_pacing_interval_microseconds{{interface=\"{}\"}} {}\n",
+            interface, iface.last_pacing_interval_us
+        ));
     }
 
     let counters = metrics.packets_received_by_type;
@@ -701,6 +713,20 @@ fn render_prometheus_metrics(
     output.push_str(&format!(
         "reticulum_transport_blackhole_entries {}\n",
         metrics.blackhole_entries
+    ));
+
+    output.push_str("# HELP reticulum_transport_packets_sent_total Total number of data packets sent across all interfaces.\n");
+    output.push_str("# TYPE reticulum_transport_packets_sent_total gauge\n");
+    output.push_str(&format!(
+        "reticulum_transport_packets_sent_total {}\n",
+        metrics.total_packets_tx
+    ));
+
+    output.push_str("# HELP reticulum_transport_pacing_wait_microseconds_total Total microseconds spent waiting for packet pacing across all interfaces.\n");
+    output.push_str("# TYPE reticulum_transport_pacing_wait_microseconds_total gauge\n");
+    output.push_str(&format!(
+        "reticulum_transport_pacing_wait_microseconds_total {}\n",
+        metrics.total_pacing_wait_us
     ));
 
     output.push_str("# HELP reticulum_transport_metrics_last_collection_timestamp_seconds Unix timestamp of the last successful transport metrics collection.\n");
