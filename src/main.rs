@@ -7,6 +7,7 @@ use reticulum_sdk::identity::PrivateIdentity;
 use reticulum_sdk::iface::modem73::Modem73Interface;
 use reticulum_sdk::iface::lora::lr1121::LR1121;
 use reticulum_sdk::iface::lora::sx1262::SX1262;
+use reticulum_sdk::iface::lora::sx1276::SX1276;
 use reticulum_sdk::iface::lora::{LoRaConfig, LoRaInterface};
 use reticulum_sdk::iface::rnode::{RNodeConfig, RNodeInterface};
 use reticulum_sdk::iface::tcp_client::TcpClient;
@@ -298,13 +299,10 @@ impl Daemon {
                     ..
                 } => {
                     log::info!(
-                        "Enabling interface '{}': RNode {} ({},{},{},{})",
+                        "Enabling interface '{}': RNode on {} @ {} Hz",
                         iface.name,
                         port,
-                        frequency,
-                        bandwidth,
-                        spreadingfactor,
-                        codingrate
+                        frequency
                     );
                     let rnode_config = RNodeConfig::new(
                         port,
@@ -396,6 +394,12 @@ impl Daemon {
                     );
 
                     match chipset.as_str() {
+                        "SX1276" => {
+                            iface_manager.lock().await.spawn(
+                                LoRaInterface::<SX1276>::new(lora_config),
+                                LoRaInterface::<SX1276>::spawn,
+                            );
+                        }
                         "SX1262" => {
                             iface_manager.lock().await.spawn(
                                 LoRaInterface::<SX1262>::new(lora_config),
