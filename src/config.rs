@@ -67,6 +67,7 @@ pub struct NamedInterface {
     #[serde(default = "default_false")]
     pub discoverable: bool,
     pub reachable_on: Option<String>,
+    pub mode: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub height: Option<f64>,
@@ -508,6 +509,7 @@ impl Config {
                 name: "Default TCP Server Interface".to_string(),
                 discoverable: false,
                 reachable_on: None,
+                mode: None,
                 latitude: None,
                 longitude: None,
                 height: None,

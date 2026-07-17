@@ -4,6 +4,7 @@ use config::{Config, InterfaceConfig, MetricsConfig};
 use rand::rngs::OsRng;
 use reticulum_sdk::hash::AddressHash;
 use reticulum_sdk::identity::PrivateIdentity;
+use reticulum_sdk::iface::InterfaceMode;
 use reticulum_sdk::iface::modem73::Modem73Interface;
 use reticulum_sdk::iface::lora::lr1121::LR1121;
 use reticulum_sdk::iface::lora::sx1262::SX1262;
@@ -34,6 +35,18 @@ use tokio::time::{interval, timeout};
 use std::os::unix::fs::OpenOptionsExt;
 
 const IDENTITY_FILE_NAME: &str = "identity";
+
+fn decode_interface_mode(mode: Option<String>) -> InterfaceMode {
+	match mode.as_deref() {
+		Some("ap") | Some("access_point") => InterfaceMode::AccessPoint,
+		Some("gateway") => InterfaceMode::Gateway,
+		Some("roaming") => InterfaceMode::Roaming,
+		Some("boundary") => InterfaceMode::Boundary,
+		Some("point_to_point") => InterfaceMode::PointToPoint,
+		Some("internal") => InterfaceMode::Internal,
+		_ => InterfaceMode::Full,
+	}
+}
 
 fn split_host_port(input: &str) -> Result<(String, u16), String> {
     if input.is_empty() {
@@ -149,6 +162,8 @@ impl Daemon {
                 continue;
             }
 
+            let iface_mode = decode_interface_mode(iface.mode);
+
             match iface.config {
                 InterfaceConfig::TCPServerInterface {
                     bind_host,
@@ -162,7 +177,7 @@ impl Daemon {
                         addr
                     );
                     let iface_addr = iface_manager.lock().await.spawn(
-                        TcpServer::new(addr, iface_manager.clone()),
+                        TcpServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode),
                         TcpServer::spawn,
                     );
                     if iface.discoverable {
@@ -198,7 +213,7 @@ impl Daemon {
                     iface_manager
                         .lock()
                         .await
-                        .spawn(TcpClient::new(addr), TcpClient::spawn);
+                        .spawn(TcpClient::new(addr).with_interface_mode(iface_mode), TcpClient::spawn);
                 }
                 InterfaceConfig::BackboneInterface {
                     bind_host,
@@ -225,7 +240,7 @@ impl Daemon {
                                 addr
                             );
                             let iface_addr = iface_manager.lock().await.spawn(
-                                BackboneServer::new(addr, iface_manager.clone()),
+                                BackboneServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode),
                                 BackboneServer::spawn,
                             );
                             if iface.discoverable {
@@ -262,7 +277,7 @@ impl Daemon {
                             iface_manager
                                 .lock()
                                 .await
-                                .spawn(BackboneClient::new(addr), BackboneClient::spawn);
+                                .spawn(BackboneClient::new(addr).with_interface_mode(iface_mode), BackboneClient::spawn);
                         }
                         None => ()
                     }
@@ -283,7 +298,7 @@ impl Daemon {
                         forward_addr
                     );
                     iface_manager.lock().await.spawn(
-                        UdpInterface::new(bind_addr, Some(forward_addr)),
+                        UdpInterface::new(bind_addr, Some(forward_addr)).with_interface_mode(iface_mode),
                         UdpInterface::spawn,
                     );
                 }
@@ -317,7 +332,7 @@ impl Daemon {
                     let iface_addr = iface_manager
                         .lock()
                         .await
-                        .spawn(RNodeInterface::new(rnode_config), RNodeInterface::spawn);
+                        .spawn(RNodeInterface::new(rnode_config).with_interface_mode(iface_mode), RNodeInterface::spawn);
                     if iface.discoverable {
                         let mut discovery_config = DiscoveryInterfaceConfig::rnode(
                             &iface.name,
@@ -350,7 +365,7 @@ impl Daemon {
                         control_addr
                     );
                     iface_manager.lock().await.spawn(
-                        Modem73Interface::new(target_addr, control_addr),
+                        Modem73Interface::new(target_addr, control_addr).with_interface_mode(iface_mode),
                         Modem73Interface::spawn,
                     );
                 }
