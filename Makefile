@@ -1,6 +1,6 @@
 ENGINE=?podman
 REPO=ghcr.io/reticulalabs
-TAG=`cat VERSION`-test
+TAG=`git describe --tags --dirty --match=v* --abbrev=1`
 
 default:
 	podman manifest rm $(REPO)/reticulum-router:$(TAG) || true
