@@ -90,6 +90,13 @@ The Reticulum Router Daemon will automatically convert any existing non-standard
   * Does *NOT* accept a local script to execute to get your IP
     * (in the future, we want to detect your external IP if reachable_on is omitted)
 
+## Implementation Differences from Python.
+
+* transport behavior mixed with access_point mode.
+  * Python: Transport mode will forward all packets (except announce) over interfaces in access_point mode.
+  * reticulum-router: When in Transport mode, broadcast, non-announce packets only flow over interfaces in access_point mode when a destination is known to exist behind the interface from the route table
+  * Effect: Allows you to attach an RNode or other low-bandwidth link directly to a transport node.
+
 ## Example syntax
 
 ```toml
