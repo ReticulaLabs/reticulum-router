@@ -1,6 +1,6 @@
 [package]
 name = "reticulum-router"
-version = "1.8.9"
+version = "1.9.0"
 edition = "2024"
 
 [dependencies]
@@ -29,4 +29,5 @@ env_logger = "0.10"
 
 # Core Reticulum Implementation
 #reticulum-sdk = { path = "../reticulum-sdk" }
+#reticulum-sdk = { git = "https://github.com/reticulaLabs/reticulum-sdk" }
 reticulum-sdk = "2.1"
