@@ -177,6 +177,41 @@ All tools and daemons support the RUST_LOG environment variable to set the log v
 * debug -- All of the above and debugging information
 * trace -- All of the above and traces of every packet
 
+## What LoRA frequency should I use?
+
+We have done some math, and come up with the following recommendations. They may shift as
+more real-world data is collected.
+
+> Why do these values differ from Meshtastic / Meshcore?
+> Because Reticulum is a global network. We are not forwarding a few text messages
+> in a small geograpgic area. Reticulum is "worldwide" meaning announcements consume
+> a large percentage of available air time if we go for "maximum range" settings.
+
+### United States
+
+> All of these settings remain below the 400ms "dwell time".
+
+Frequency: 914.875 Mhz.  Gives distance to lower-frequency Meshtastic / Meshcore.
+
+| Name            | Bitrate    | Bandwidth      | Spreading Factor  | Coding Rate            | Notes                           |
+|-----------------|------------|----------------|-------------------|------------------------|---------------------------------|
+| Turbo / Short   | 21.8 Kbps  | 500 kHz        | 7                 | 4/5  (5)               | Maximum speed, shortest range. Won't like interference. Older RNode firmwares might have issues|
+| Fast / Medimum  | 10.9 Kbps  | 250 kHz        | 7                 | 4/5  (5)               | Fast, medium range.  Compromise on range for faster speed|
+| Average / Long  | 6.2 Kbps   | 250 kHz        | 8                 | 4/5  (5)               | Good balance of range and speed. Recommended|
+| Slow / Long     | 1.7 Kbps   | 125 kHz        | 9                 | 4/5  (5)               | Slow, maximum range and interference rejection. Announcements will cut into available bitrate|
+
+### Europe
+
+> All of these settings reming below the EU duty cycle of 10%
+
+Frequency: 869.431 Mhz.
+
+| Name            | Bitrate    | Bandwidth      | Spreading Factor  | Coding Rate            | Notes                           |
+|-----------------|------------|----------------|-------------------|------------------------|---------------------------------|
+| Fast / Medium   | 3.3 Kbps   | 125 kHz        | 8                 | 4/5  (5)               | Recommended. 10% Duty Cycle limit|
+| Slow / Long     | 1.1 Kbps   | 62.5 kHz       | 8                 | 4/7  (7)               | Narrower bandwidth for noise rejection. Longer range in urban environments|
+| Slow / Long     | 0.879 Kbps | 62.5 kHz       | 9                 | 4/5  (5)               | Narrower bandwidth for maximum noise rejection / range in urban environments. Announcements will cut into available bitrate|
+
 # Installing
 
 ## Compiling Source Code
