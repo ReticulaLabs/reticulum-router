@@ -36,7 +36,7 @@ checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
@@ -582,9 +582,9 @@ checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
 
 [[package]]
 name = "hyper"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
+checksum = "d22053281f852e11534f5198498373cbb59295120a20771d90f7ed1897490a72"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1103,7 +1103,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "reticulum-router"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "base64",
  "bzip2",
@@ -1128,9 +1128,9 @@ dependencies = [
 
 [[package]]
 name = "reticulum-sdk"
-version = "2.1.21"
+version = "2.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb3f36c05844cd6ae2bfabc7b2d45b4057f807edf49abcdcd7fb400210f4420"
+checksum = "fc61b65364d11c52a8c0c1ef1f2cbe1cb0c1c134319bb6edf6d283bcd741101b"
 dependencies = [
  "aes",
  "cbc",
@@ -1237,14 +1237,14 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
  "memchr",
@@ -1377,9 +1377,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.1"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5edbec4ed188954a10c12c038215f8ce7606b2d5c973cd8dc43e8795065c5f2f"
+checksum = "a207d6d6a2b7fc470b80443726053f18a2481b7e1eee970597051596567987a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1431,7 +1431,7 @@ checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
