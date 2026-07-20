@@ -685,6 +685,12 @@ fn render_prometheus_metrics(
             "reticulum_transport_interface_pacing_interval_microseconds{{interface=\"{}\"}} {}\n",
             interface, iface.last_pacing_interval_us
         ));
+        output.push_str("# HELP reticulum_transport_interface_channel_load Current channel load as a percentage × 1000 (e.g. 6.9% → 6900).\n");
+        output.push_str("# TYPE reticulum_transport_interface_channel_load gauge\n");
+        output.push_str(&format!(
+            "reticulum_transport_interface_channel_load{{interface=\"{}\"}} {}\n",
+            interface, iface.channel_load
+        ));
     }
 
     let counters = metrics.packets_received_by_type;
