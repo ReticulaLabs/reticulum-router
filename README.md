@@ -90,13 +90,6 @@ The Reticulum Router Daemon will automatically convert any existing non-standard
   * Does *NOT* accept a local script to execute to get your IP
     * (in the future, we want to detect your external IP if reachable_on is omitted)
 
-## Implementation Differences from Python.
-
-* transport behavior mixed with access_point mode.
-  * Python: Transport mode will forward all packets (except announce) over interfaces in access_point mode.
-  * reticulum-router: When in Transport mode, broadcast, non-announce packets only flow over interfaces in access_point mode when a destination is known to exist behind the interface from the route table
-  * Effect: Allows you to attach an RNode or other low-bandwidth link directly to a transport node.
-
 ## Example syntax
 
 ```toml
@@ -128,6 +121,7 @@ enabled = false
 [[interfaces]]
 name = "Local"
 type = "BackboneInterface"
+mode = "boundary"
 enabled = true
 bind_host = "0.0.0.0"
 bind_port = 4242
@@ -137,6 +131,7 @@ reachable_on = "cool.server.com:4242"
 [[interfaces]]
 name = "Modem73"
 type = "Modem73Interface"
+mode = "internal"
 enabled = false
 target_host = "127.0.0.1"
 target_port = 8001
@@ -146,6 +141,7 @@ control_port = 8073
 [[interfaces]]
 name = "LoRa via SPI"
 type = "LoRaInterface"
+mode = "internal"
 enabled = true
 chipset = "SX1262"
 spi_path = "/dev/spidev0.0"
@@ -158,6 +154,7 @@ codingrate = 5
 [[interfaces]]
 name = "GhostMesh 👻 ATX (IPv4,IPv6,LoRA)"
 type = "TCPClientInterface"
+mode = "boundary"
 enabled = true
 target_host = "rns.atx.ghostmesh.net"
 target_port = 4242
