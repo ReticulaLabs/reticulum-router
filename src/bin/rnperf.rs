@@ -47,6 +47,7 @@ struct Args {
     dest: Option<String>,
     remote_identity: Option<String>,
     announce_interval: Option<u64>,
+    rate: f64,
 }
 
 impl Args {
@@ -59,6 +60,7 @@ impl Args {
             dest: None,
             remote_identity: None,
             announce_interval: None,
+            rate: 5_000_000_000.0,
         }
     }
 }
@@ -90,6 +92,10 @@ fn parse_args() -> RResult<Args> {
             "-R" | "--remote-identity" => {
                 a.remote_identity = Some(next_val(&mut it, &arg)?);
             }
+            "-r" | "--rate" => {
+                let v = next_val(&mut it, &arg)?;
+                a.rate = v.parse::<f64>().map_err(|_| "bad rate")?;
+            }
             "-v" | "--verbose" => { a.verbose += 1; }
             _ if arg.starts_with('-') => { bail!("unrecognized: {arg}") }
             _ => {
@@ -117,6 +123,7 @@ fn print_help() {
     eprintln!("  -d, --duration <sec>      Test duration in seconds (default: {DEFAULT_DURATION})");
     eprintln!("  -s, --size <bytes>        Packet payload size (default: MDU)");
     eprintln!("  -R, --remote-identity <hash>  Listener's public identity hash (hex)");
+    eprintln!("  -r, --rate <bps>          Target send rate in bits/sec (default: 5G)");
     eprintln!("  -v, --verbose             Verbose output");
     eprintln!("  --version                 Show version");
     eprintln!("  -h, --help                Help");
@@ -620,7 +627,7 @@ async fn initiator(a: &Args) -> RResult<()> {
     let mdu = link_arc.lock().await.channel_mdu();
     let data_size = a.packet_size.unwrap_or(mdu.saturating_sub(4));
     let data_size = data_size.min(mdu.saturating_sub(4)).max(1);
-    log::info!("rnperf: MDU={mdu}, using packet payload size={data_size}B");
+    log::info!("rnperf: MDU={mdu}, using packet payload size={data_size}B, rate={:.0} bps", a.rate);
 
     send_channel(&link_arc, &transport, MSG_TYPE_TEST_CONFIG,
         &pack_test_config(a.duration, data_size as u64)).await?;
@@ -633,10 +640,11 @@ async fn initiator(a: &Args) -> RResult<()> {
     let mut total_bytes_sent: u64 = 0;
     let mut total_packets_sent: u64 = 0;
 
-    // Cap send rate at 5 Gbps to avoid overwhelming the transport
-    // burst_sleep = (burst_size * data_size * 8) / 5 nanoseconds
+    // Cap send rate to avoid overwhelming the transport
     let burst_size: u64 = 100;
-    let burst_sleep = Duration::from_nanos(burst_size * data_size as u64 * 8 / 5);
+    let burst_sleep = Duration::from_secs_f64(
+        burst_size as f64 * data_size as f64 * 8.0 / a.rate,
+    );
     let mut burst_start = Instant::now();
 
     while Instant::now() < send_deadline {

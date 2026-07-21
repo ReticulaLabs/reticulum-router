@@ -311,7 +311,7 @@ impl Daemon {
                     txpower,
                     spreadingfactor,
                     codingrate,
-                    flow_control: _,
+                    flow_control,
                     ..
                 } => {
                     log::info!(
@@ -320,7 +320,7 @@ impl Daemon {
                         port,
                         frequency
                     );
-                    let rnode_config = RNodeConfig::new(
+                    let mut rnode_config = RNodeConfig::new(
                         port,
                         frequency,
                         bandwidth,
@@ -328,7 +328,7 @@ impl Daemon {
                         spreadingfactor,
                         codingrate,
                     );
-                    //rnode_config.with_flow_control(flow_control);
+                    rnode_config = rnode_config.with_flow_control(flow_control);
                     rnode_config.validate()?;
                     let iface_addr = iface_manager
                         .lock()
