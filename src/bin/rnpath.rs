@@ -1,4 +1,7 @@
 use hmac::{Hmac, Mac};
+use rand::rngs::{StdRng, SysRng};
+use rand::Rng;
+use rand::SeedableRng;
 use rmpv::{Value, decode::read_value, encode::write_value};
 use sha2::Sha256;
 use std::env;
@@ -251,9 +254,9 @@ fn connect_rpc(port: u16, rpc_key: &[u8]) -> Result<TcpStream, String> {
 }
 
 fn shared_rpc_challenge() -> Vec<u8> {
-    use rand::RngCore;
     let mut random = [0u8; 40];
-    rand::rngs::OsRng.fill_bytes(&mut random);
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+    rng.fill_bytes(&mut random);
 
     let mut challenge = Vec::with_capacity(PY_CONN_CHALLENGE.len() + 7 + random.len());
     challenge.extend_from_slice(PY_CONN_CHALLENGE);

@@ -1,7 +1,8 @@
 mod config;
 
 use config::{Config, InterfaceConfig, MetricsConfig};
-use rand::rngs::OsRng;
+use rand::rngs::{StdRng, SysRng};
+use rand::SeedableRng;
 use reticulum_sdk::hash::AddressHash;
 use reticulum_sdk::identity::PrivateIdentity;
 use reticulum_sdk::iface::InterfaceMode;
@@ -817,7 +818,8 @@ fn load_or_create_identity(
         return Ok(identity);
     }
 
-    let identity = PrivateIdentity::new_from_rand(OsRng);
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+    let identity = PrivateIdentity::new_from_rand(&mut rng);
     save_identity(&identity_path, &identity)?;
     log::info!(
         "Generated new Reticulum identity {} at {}",

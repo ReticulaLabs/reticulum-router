@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use rand::rngs::OsRng;
+use rand::rngs::{StdRng, SysRng};
+use rand::SeedableRng;
 use reticulum_sdk::destination::link::{Link, LinkEvent};
 use reticulum_sdk::destination::{DestinationName, DestinationDesc};
 use reticulum_sdk::hash::ADDRESS_HASH_SIZE;
@@ -136,7 +137,8 @@ fn load_ident() -> RResult<PrivateIdentity> {
         log::info!("rnperf: loaded identity from {pb:?}");
         return Ok(id);
     }
-    let id = PrivateIdentity::new_from_rand(OsRng);
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+    let id = PrivateIdentity::new_from_rand(&mut rng);
     if let Some(p) = pb.parent() { fs::create_dir_all(p)?; }
     let hex = format!("{}\n", id.to_hex_string());
     {

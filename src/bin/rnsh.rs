@@ -17,7 +17,8 @@ use nix::pty::openpty;
 use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios, LocalFlags, InputFlags, OutputFlags, ControlFlags};
 use nix::unistd::{dup2, fork, setsid, ForkResult};
-use rand::rngs::OsRng;
+use rand::rngs::{StdRng, SysRng};
+use rand::SeedableRng;
 use reticulum_sdk::destination::link::{Link, LinkEvent};
 use reticulum_sdk::destination::{DestinationName, DestinationDesc};
 use reticulum_sdk::hash::{ADDRESS_HASH_SIZE, AddressHash};
@@ -133,7 +134,8 @@ fn load_ident(path: Option<&str>, svc: &str) -> RResult<PrivateIdentity> {
         log::info!("rnsh: loaded identity from {pb:?}");
         return Ok(id);
     }
-    let id = PrivateIdentity::new_from_rand(OsRng);
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+    let id = PrivateIdentity::new_from_rand(&mut rng);
     if let Some(p) = pb.parent() { fs::create_dir_all(p)?; }
     let hex = format!("{}\n", id.to_hex_string());
     #[cfg(unix)] {
@@ -973,7 +975,8 @@ async fn do_version_handshake(
     if !got_exec { bail!("exec command timeout"); }
 
     // Return raw remote command; handle_link applies overrides/shell
-    let dummy_ident = PrivateIdentity::new_from_rand(OsRng);
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+    let dummy_ident = PrivateIdentity::new_from_rand(&mut rng);
     Ok((dummy_ident, cmd, term, rows, cols))
 }
 

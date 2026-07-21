@@ -1,6 +1,7 @@
 use base64::Engine;
 use ed25519_dalek::Signature;
-use rand::rngs::OsRng;
+use rand::rngs::{StdRng, SysRng};
+use rand::SeedableRng;
 use reticulum_sdk::destination::{DestinationName, SingleOutputDestination};
 use reticulum_sdk::hash::AddressHash;
 use reticulum_sdk::identity::{Identity, PUBLIC_KEY_LENGTH, PrivateIdentity};
@@ -379,7 +380,8 @@ fn get_operating_identity(
     allow_none: bool,
 ) -> Result<Option<WorkingIdentity>, (i32, String)> {
     if let Some(path) = &args.generate {
-        let identity = PrivateIdentity::new_from_rand(OsRng);
+        let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+        let identity = PrivateIdentity::new_from_rand(&mut rng);
         let path = expand_home(path);
         if path.exists() && !args.force {
             return err(
@@ -1014,6 +1016,7 @@ fn encrypt_path(args: &Args, identity: &WorkingIdentity, path: &str) -> Result<(
     let mut buf = vec![0u8; ENC_CHUNK];
     let mut out_buf = vec![0u8; ENC_CHUNK + 256];
     let mut wrote = 0usize;
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
     loop {
         let read = input.read(&mut buf).map_err(|e| {
             (
@@ -1029,7 +1032,7 @@ fn encrypt_path(args: &Args, identity: &WorkingIdentity, path: &str) -> Result<(
         }
         let encrypted = identity
             .identity()
-            .encrypt_packet(OsRng, &buf[..read], None, &mut out_buf)
+            .encrypt_packet(&mut rng, &buf[..read], None, &mut out_buf)
             .map_err(|e| {
                 (
                     R_UNKNOWN_ERROR,
@@ -1126,6 +1129,7 @@ fn decrypt_path(args: &Args, identity: &WorkingIdentity, path: &str) -> Result<(
     let mut buf = vec![0u8; DEC_CHUNK];
     let mut out_buf = vec![0u8; DEC_CHUNK];
     let mut wrote = 0usize;
+    let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
     loop {
         let read = input.read(&mut buf).map_err(|e| {
             (
@@ -1137,7 +1141,7 @@ fn decrypt_path(args: &Args, identity: &WorkingIdentity, path: &str) -> Result<(
             break;
         }
         let decrypted = private
-            .decrypt_packet(OsRng, &buf[..read], None, &mut out_buf)
+            .decrypt_packet(&mut rng, &buf[..read], None, &mut out_buf)
             .map_err(|_| {
                 (
                     R_DECRYPT_FAILED,
@@ -1669,7 +1673,8 @@ mod tests {
 
     #[test]
     fn rsg_validates_against_embedded_public_key() {
-        let identity = PrivateIdentity::new_from_rand(OsRng);
+        let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+        let identity = PrivateIdentity::new_from_rand(&mut rng);
         let message = b"hello";
         let rsg = create_rsg(&identity, message, true, None, Encoding::Bin).unwrap();
         let (valid, signer) = validate_rsg(&rsg, message, None).unwrap();
