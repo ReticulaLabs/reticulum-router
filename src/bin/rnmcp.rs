@@ -139,37 +139,8 @@ impl RpcConnection {
             .set_write_timeout(Some(Duration::from_secs(30)))
             .map_err(|e| format!("set timeout: {e}"))?;
 
-        // Server sends challenge; client responds with HMAC
-        let challenge = read_frame(&mut stream, PY_CONN_AUTH_MAX_FRAME)?;
+        authenticate_stream(&mut stream, &self.rpc_key)?;
 
-        if !challenge.starts_with(PY_CONN_CHALLENGE) {
-            return Err("server did not send a challenge".to_string());
-        }
-
-        let message = &challenge[PY_CONN_CHALLENGE.len()..];
-        let response = hmac_response(&self.rpc_key, message)?;
-        write_frame(&mut stream, &response)?;
-
-        let welcome = read_frame(&mut stream, PY_CONN_AUTH_MAX_FRAME)?;
-        if welcome == PY_CONN_FAILURE {
-            return Err("authentication failed: RPC key rejected".to_string());
-        }
-        if welcome != PY_CONN_WELCOME {
-            return Err("unexpected response during authentication".to_string());
-        }
-
-        // Mutual auth: challenge the server
-        let peer_challenge = generate_challenge();
-        write_frame(&mut stream, &peer_challenge)?;
-
-        let peer_response = read_frame(&mut stream, PY_CONN_AUTH_MAX_FRAME)?;
-        if !verify_response(&peer_challenge, &peer_response, &self.rpc_key)? {
-            return Err("server failed mutual authentication".to_string());
-        }
-
-        write_frame(&mut stream, PY_CONN_WELCOME)?;
-
-        // Send the actual RPC request and receive response
         let mut encoded = Vec::new();
         write_value(&mut encoded, request).map_err(|e| format!("encode: {e}"))?;
 
@@ -178,6 +149,62 @@ impl RpcConnection {
         let response_data = read_frame(&mut stream, MAX_RPC_FRAME)?;
         read_value(&mut &response_data[..])
             .map_err(|e| format!("decode response: {e}"))
+    }
+
+    fn sniff_packets(
+        &self,
+        destination_filter: &Option<Vec<u8>>,
+        max_packets: usize,
+    ) -> Result<Vec<Value>, String> {
+        let addr = format!("127.0.0.1:{}", self.port);
+        let mut stream = TcpStream::connect(&addr)
+            .map_err(|e| format!("connect to {addr}: {e}"))?;
+
+        stream
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .map_err(|e| format!("set timeout: {e}"))?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(30)))
+            .map_err(|e| format!("set timeout: {e}"))?;
+
+        authenticate_stream(&mut stream, &self.rpc_key)?;
+
+        let listen_map = match &destination_filter {
+            Some(dest) => Value::Map(vec![
+                (Value::from("listen"), Value::Map(vec![
+                    (Value::from("destination"), Value::Binary(dest.clone())),
+                ])),
+            ]),
+            None => Value::Map(vec![
+                (Value::from("listen"), Value::Map(vec![])),
+            ]),
+        };
+
+        let mut encoded = Vec::new();
+        write_value(&mut encoded, &listen_map).map_err(|e| format!("encode: {e}"))?;
+        write_frame(&mut stream, &encoded)?;
+
+        // Read initial {"status": "listening"} response
+        let _status_data = read_frame(&mut stream, MAX_RPC_FRAME)?;
+
+        // Short timeout for packet reads
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .map_err(|e| format!("set timeout: {e}"))?;
+
+        let mut packets = Vec::new();
+        for _ in 0..max_packets {
+            match read_frame(&mut stream, MAX_RPC_FRAME) {
+                Ok(data) => {
+                    if let Ok(v) = read_value(&mut &data[..]) {
+                        packets.push(v);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        Ok(packets)
     }
 }
 
@@ -272,6 +299,36 @@ fn verify_response(
     let expected = hmac_response(auth_key, message)?;
     let expected_raw = &expected[b"{sha256}".len()..];
     Ok(response == expected.as_slice() || response == expected_raw)
+}
+
+fn authenticate_stream(stream: &mut TcpStream, rpc_key: &[u8]) -> Result<(), String> {
+    let challenge = read_frame(stream, PY_CONN_AUTH_MAX_FRAME)?;
+    if !challenge.starts_with(PY_CONN_CHALLENGE) {
+        return Err("server did not send a challenge".to_string());
+    }
+
+    let message = &challenge[PY_CONN_CHALLENGE.len()..];
+    let response = hmac_response(rpc_key, message)?;
+    write_frame(stream, &response)?;
+
+    let welcome = read_frame(stream, PY_CONN_AUTH_MAX_FRAME)?;
+    if welcome == PY_CONN_FAILURE {
+        return Err("authentication failed: RPC key rejected".to_string());
+    }
+    if welcome != PY_CONN_WELCOME {
+        return Err("unexpected response during authentication".to_string());
+    }
+
+    let peer_challenge = generate_challenge();
+    write_frame(stream, &peer_challenge)?;
+
+    let peer_response = read_frame(stream, PY_CONN_AUTH_MAX_FRAME)?;
+    if !verify_response(&peer_challenge, &peer_response, rpc_key)? {
+        return Err("server failed mutual authentication".to_string());
+    }
+
+    write_frame(stream, PY_CONN_WELCOME)?;
+    Ok(())
 }
 
 // ── MCP Server ──
@@ -391,6 +448,7 @@ impl McpServer {
             "drop_announces" => self.drop_announces()?,
             "get_metrics" => self.get_metrics()?,
             "get_interfaces" => self.get_interfaces()?,
+            "sniff_packets" => self.sniff_packets(args)?,
             _ => return Err(format!("unknown tool: {name}")),
         };
 
@@ -843,6 +901,87 @@ impl McpServer {
         Ok(output)
     }
 
+    fn sniff_packets(&mut self, args: &JsonMap) -> Result<String, String> {
+        let max_packets = args
+            .get("count")
+            .and_then(|v| v.as_u64())
+            .map(|c| c as usize)
+            .unwrap_or(5)
+            .clamp(1, 50);
+
+        let destination_filter = args
+            .get("destination")
+            .and_then(|v| v.as_str())
+            .map(|s| {
+                let bytes = decode_hex(s)?;
+                if bytes.len() != ADDRESS_HASH_SIZE {
+                    return Err(format!(
+                        "destination must be {} hex chars",
+                        ADDRESS_HASH_SIZE * 2
+                    ));
+                }
+                Ok(bytes)
+            })
+            .transpose()?;
+
+        let packets = self.rpc.sniff_packets(&destination_filter, max_packets)?;
+
+        if packets.is_empty() {
+            return Ok("No packets captured (timeout or no traffic)\n".to_string());
+        }
+
+        let dest_label = destination_filter
+            .as_ref()
+            .map(|d| format!(" filtered on {}", hex_encode(d)))
+            .unwrap_or_default();
+        let mut output = format!("Captured {} packet(s){dest_label}:\n", packets.len());
+
+        for (i, packet) in packets.iter().enumerate() {
+            let map = match packet.as_map() {
+                Some(m) => m,
+                None => {
+                    output.push_str(&format!("  Packet {}: <invalid format>\n", i + 1));
+                    continue;
+                }
+            };
+
+            let dest = map_get_bytes(map, "destination");
+            let iface = map_get_bytes(map, "iface");
+            let hops = map_get_u64(map, "hops").unwrap_or(0);
+            let header_type = map_get_u64(map, "header_type").unwrap_or(0);
+            let packet_type = map_get_u64(map, "packet_type").unwrap_or(0);
+            let context = map_get_u64(map, "context").unwrap_or(0);
+            let payload_len = map_get_u64(map, "payload_len").unwrap_or(0);
+            let snr = map_get_f64(map, "snr");
+            let rssi = map_get_f64(map, "rssi");
+
+            let dest_str = dest.map(hex_encode).unwrap_or_else(|| "?".to_string());
+            let iface_str = iface.map(hex_encode).unwrap_or_else(|| "?".to_string());
+
+            let ptype_str = match packet_type {
+                0 => "Data",
+                1 => "Announce",
+                2 => "LinkRequest",
+                3 => "Proof",
+                _ => "Unknown",
+            };
+
+            output.push_str(&format!("  Packet {}:\n", i + 1));
+            output.push_str(&format!("    Destination: {dest_str}\n"));
+            output.push_str(&format!("    Type: {ptype_str} (hops={hops}, header={header_type}, ctx={context})\n"));
+            output.push_str(&format!("    Interface: {iface_str}\n"));
+            output.push_str(&format!("    Payload: {payload_len} bytes\n"));
+            if let Some(snr_v) = snr {
+                output.push_str(&format!("    SNR: {snr_v:.1} dB\n"));
+            }
+            if let Some(rssi_v) = rssi {
+                output.push_str(&format!("    RSSI: {rssi_v:.0} dBm\n"));
+            }
+        }
+
+        Ok(output)
+    }
+
     fn get_interfaces(&mut self) -> Result<String, String> {
         let request = Value::Map(vec![(
             Value::from("get"),
@@ -1029,6 +1168,23 @@ fn list_tools() -> Vec<JsonValue> {
             ("inputSchema", json_obj(&[
                 ("type", JsonValue::String("object".into())),
                 ("properties", json_obj(&[])),
+            ])),
+        ]),
+        json_obj(&[
+            ("name", JsonValue::String("sniff_packets".into())),
+            ("description", JsonValue::String("Listen for live network traffic and return captured packets. Opens a short-lived promiscuous listen on the Reticulum transport. Optionally filter by destination address and control how many packets to capture.".into())),
+            ("inputSchema", json_obj(&[
+                ("type", JsonValue::String("object".into())),
+                ("properties", json_obj(&[
+                    ("destination", json_obj(&[
+                        ("type", JsonValue::String("string".into())),
+                        ("description", JsonValue::String("Optional hex destination hash to filter on (32 hex chars)".into())),
+                    ])),
+                    ("count", json_obj(&[
+                        ("type", JsonValue::String("number".into())),
+                        ("description", JsonValue::String("Number of packets to capture (1-50, default 5)".into())),
+                    ])),
+                ])),
             ])),
         ]),
     ]
