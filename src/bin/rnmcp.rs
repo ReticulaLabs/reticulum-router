@@ -390,6 +390,7 @@ impl McpServer {
             "drop_path" => self.drop_path(args)?,
             "drop_announces" => self.drop_announces()?,
             "get_metrics" => self.get_metrics()?,
+            "get_interfaces" => self.get_interfaces()?,
             _ => return Err(format!("unknown tool: {name}")),
         };
 
@@ -841,6 +842,42 @@ impl McpServer {
 
         Ok(output)
     }
+
+    fn get_interfaces(&mut self) -> Result<String, String> {
+        let request = Value::Map(vec![(
+            Value::from("get"),
+            Value::from("interfaces"),
+        )]);
+        let response = self.rpc.send_rpc(&request)?;
+
+        let entries = response
+            .as_array()
+            .ok_or_else(|| "invalid response: expected array".to_string())?;
+
+        if entries.is_empty() {
+            return Ok("No active interfaces\n".to_string());
+        }
+
+        let mut output = String::from("Active Interfaces:\n");
+        for entry in entries {
+            let map = entry
+                .as_map()
+                .ok_or_else(|| "invalid interface entry".to_string())?;
+
+            let if_name = map_get_str(map, "name").unwrap_or("?");
+            let if_type = map_get_str(map, "type").unwrap_or("?");
+            let identity = map_get_bytes(map, "identity");
+            let error_count = map_get_u64(map, "error_count").unwrap_or(0);
+
+            let identity_hex = identity.map(hex_encode).unwrap_or_else(|| "?".to_string());
+            output.push_str(&format!("  {if_name}\n"));
+            output.push_str(&format!("    Type: {if_type}\n"));
+            output.push_str(&format!("    Identity: {identity_hex}\n"));
+            output.push_str(&format!("    Errors: {error_count}\n"));
+        }
+
+        Ok(output)
+    }
 }
 
 // ── MCP Tool Definitions ──
@@ -981,6 +1018,14 @@ fn list_tools() -> Vec<JsonValue> {
         json_obj(&[
             ("name", JsonValue::String("get_metrics".into())),
             ("description", JsonValue::String("Get a summary of transport metrics including path table size, rate table size, blackhole count, and last signal data.".into())),
+            ("inputSchema", json_obj(&[
+                ("type", JsonValue::String("object".into())),
+                ("properties", json_obj(&[])),
+            ])),
+        ]),
+        json_obj(&[
+            ("name", JsonValue::String("get_interfaces".into())),
+            ("description", JsonValue::String("List all active interfaces with type, name, identity, and error count.".into())),
             ("inputSchema", json_obj(&[
                 ("type", JsonValue::String("object".into())),
                 ("properties", json_obj(&[])),
