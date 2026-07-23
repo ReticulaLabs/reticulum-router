@@ -32,6 +32,8 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
   * Shell service for the Reticulum network. Listens for connections over Reticulum, or initiate connections to remote rnsh destinations
 * `rnpage` - NomadNet page server
   * Announces and serves documents such as [Micron](https://github.com/RFnexus/micron-parser-js) pages over Reticulum
+* `rnmcp` - MCP connector for the RPC / shared_instance control port
+  * Probably a horrific idea
 
 ## Implemented protocol features
 
