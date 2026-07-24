@@ -19,12 +19,14 @@ pub struct Config {
 pub struct ReticulumConfig {
     #[serde(default)]
     pub enable_transport: bool,
-    #[serde(default = "default_true")]
-    pub share_instance: bool,
-    #[serde(default = "default_shared_port")]
-    pub shared_instance_port: u16,
-    #[serde(default = "default_control_port")]
-    pub instance_control_port: u16,
+    #[serde(default, alias = "share_instance")]
+    pub enable_rpc: bool,
+    #[serde(default = "default_rpc_data_port", alias = "shared_instance_port")]
+    pub rpc_data_port: u16,
+    #[serde(default = "default_rpc_control_port", alias = "instance_control_port")]
+    pub rpc_control_port: u16,
+    #[serde(default = "default_local_bind_host")]
+	pub rpc_bind_host: String,
     #[serde(default)]
     pub panic_on_interface_error: bool,
     #[serde(default)]
@@ -49,7 +51,7 @@ pub struct LoggingConfig {
 pub struct MetricsConfig {
     #[serde(default = "default_false")]
     pub enabled: bool,
-    #[serde(default = "default_metrics_bind_host")]
+    #[serde(default = "default_local_bind_host")]
     pub bind_host: String,
     #[serde(default = "default_metrics_bind_port")]
     pub bind_port: u16,
@@ -267,16 +269,16 @@ fn default_false() -> bool {
 fn default_port() -> u16 {
     4242
 }
-fn default_shared_port() -> u16 {
+fn default_rpc_data_port() -> u16 {
     37428
 }
-fn default_control_port() -> u16 {
+fn default_rpc_control_port() -> u16 {
     37429
 }
 fn default_loglevel() -> u8 {
     4
 }
-fn default_metrics_bind_host() -> String {
+fn default_local_bind_host() -> String {
     "127.0.0.1".to_string()
 }
 fn default_metrics_bind_port() -> u16 {
@@ -305,9 +307,10 @@ impl Default for ReticulumConfig {
     fn default() -> Self {
         Self {
             enable_transport: false,
-            share_instance: false,
-            shared_instance_port: 37428,
-            instance_control_port: 37429,
+            enable_rpc: false,
+            rpc_data_port: 37428,
+            rpc_control_port: 37429,
+            rpc_bind_host: default_local_bind_host(),
             instance_name: None,
             rpc_key: None,
             panic_on_interface_error: false,
@@ -328,7 +331,7 @@ impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            bind_host: default_metrics_bind_host(),
+            bind_host: default_local_bind_host(),
             bind_port: default_metrics_bind_port(),
             collection_interval_seconds: default_metrics_collection_interval_seconds(),
             collection_timeout_seconds: default_metrics_collection_timeout_seconds(),
@@ -464,15 +467,6 @@ impl Config {
         }
         let content = std::fs::read_to_string(&config_file)?;
         let config: Config = toml::from_str(&content)?;
-
-        if config.reticulum.share_instance {
-            log::warn!(
-                "share_instance is enabled but shared instances are not supported in reticulum-rs"
-            );
-            log::warn!(
-                "Each Rust daemon process runs independently and is only limited by available ports"
-            );
-        }
 
         Ok(config)
     }

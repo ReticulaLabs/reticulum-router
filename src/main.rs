@@ -105,10 +105,13 @@ impl Daemon {
             );
 
             // RPC for local instance sharing
-            cfg.set_share_instance(config.reticulum.share_instance);
+            cfg.set_rpc_instance(config.reticulum.enable_rpc);
+            cfg.set_rpc_bind_host(&config.reticulum.rpc_bind_host);
+            cfg.set_rpc_data_port(config.reticulum.rpc_data_port);
+            cfg.set_rpc_control_port(config.reticulum.rpc_control_port);
             match config.reticulum.rpc_key {
                 Some(key) => {
-                    log::trace!("Loading RPC key securing shared instance.");
+                    log::trace!("Loading RPC key securing rpc instance.");
                     cfg.set_rpc_key_hex(&key)?;
                 }
                 None => {}

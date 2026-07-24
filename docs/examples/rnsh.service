@@ -2,7 +2,7 @@
 #
 # Allowed identities are loaded from ~/.config/rnsh/allowed_identities
 #
-# If a local reticulum-router isn't running with shared_instance enabled,
+# If a local reticulum-router isn't running with enable_rpc,
 # ensure ~/.config/reticulum/config.toml exists with at least one valid
 # Reticulum interface
 #

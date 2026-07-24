@@ -15,6 +15,7 @@ const PY_CONN_WELCOME: &[u8] = b"#WELCOME#";
 const PY_CONN_FAILURE: &[u8] = b"#FAILURE#";
 const PY_CONN_AUTH_MAX_FRAME: usize = 256;
 const MAX_RPC_FRAME: usize = 1024 * 1024;
+const DEFAULT_CONTROL_HOST: &str = "127.0.0.1";
 const DEFAULT_CONTROL_PORT: u16 = 37429;
 const ADDRESS_HASH_SIZE: usize = 16;
 
@@ -32,6 +33,7 @@ struct Args {
     unblackhole: bool,
     blackhole_duration: Option<f64>,
     blackhole_reason: Option<String>,
+    host: String,
     port: u16,
     rpc_key: Option<String>,
     json: bool,
@@ -55,7 +57,7 @@ fn run() -> Result<i32, String> {
 
     let rpc_key = resolve_rpc_key(&args)?;
 
-    let mut stream = connect_rpc(args.port, &rpc_key)?;
+    let mut stream = connect_rpc(&args.host, args.port, &rpc_key)?;
 
     if args.blackholed {
         return do_blackholed(&mut stream, &args);
@@ -99,6 +101,7 @@ fn run() -> Result<i32, String> {
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
+        host: DEFAULT_CONTROL_HOST.to_string(),
         port: DEFAULT_CONTROL_PORT,
         ..Args::default()
     };
@@ -130,6 +133,9 @@ fn parse_args() -> Result<Args, String> {
                 args.blackhole_duration = Some(val.parse::<f64>().map_err(|_| "Invalid duration".to_string())?);
             }
             "--reason" => args.blackhole_reason = Some(next_value(&mut it, "--reason")?),
+            "-H" | "--host" => {
+                args.host = next_value(&mut it, &arg)?;
+            }
             "-p" | "--port" => {
                 let val = next_value(&mut it, &arg)?;
                 args.port = val.parse::<u16>().map_err(|_| "Invalid port".to_string())?;
@@ -210,8 +216,8 @@ fn resolve_rpc_key(args: &Args) -> Result<Vec<u8>, String> {
     Err("No RPC key specified. Use --rpc-key <hex> to provide the shared instance RPC key.".to_string())
 }
 
-fn connect_rpc(port: u16, rpc_key: &[u8]) -> Result<TcpStream, String> {
-    let addr = format!("127.0.0.1:{port}");
+fn connect_rpc(host: &str, port: u16, rpc_key: &[u8]) -> Result<TcpStream, String> {
+    let addr = format!("{host}:{port}");
     let mut stream = TcpStream::connect(&addr)
         .map_err(|e| format!("Could not connect to {addr}: {e}"))?;
 
@@ -881,6 +887,7 @@ fn print_help() {
     println!("  --reason <text>         Reason for blackholing");
     println!();
     println!("Connection:");
+    println!("  -H, --host <host>       RPC control host (default: {DEFAULT_CONTROL_HOST})");
     println!("  -p, --port <port>       RPC control port (default: {DEFAULT_CONTROL_PORT})");
     println!("  -k, --rpc-key <key>     RPC key for authentication (hex, file path, or RETICULUM_RPC_KEY env)");
     println!();

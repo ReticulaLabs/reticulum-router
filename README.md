@@ -19,7 +19,7 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
 
 ### Utilities
 
-> All tools will prefer using a local running `reticulum-router` instance via the share_instance RPC port.
+> All tools will prefer using a local running `reticulum-router` instance via the enable_rpc service ports
 > However, `rnsh` will fallback to connecting to the Reticulum network directly (based on the standard configuration file) preventing the need to deploy reticulum-router on all endpoints.
 
 * `rnid` - Identity Management
@@ -32,7 +32,7 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
   * Shell service for the Reticulum network. Listens for connections over Reticulum, or initiate connections to remote rnsh destinations
 * `rnpage` - NomadNet page server
   * Announces and serves documents such as [Micron](https://github.com/RFnexus/micron-parser-js) pages over Reticulum
-* `rnmcp` - MCP connector for the RPC / shared_instance control port
+* `rnmcp` - MCP connector for the RPC control port
   * Probably a horrific idea
 
 ## Implemented protocol features
@@ -91,15 +91,20 @@ The Reticulum Router Daemon will automatically convert any existing non-standard
   * We *DO* optionally want a port number, because sometimes things are behind load balancers
   * Does *NOT* accept a local script to execute to get your IP
     * (in the future, we want to detect your external IP if reachable_on is omitted)
+* The shared_instance language has been replaced by "enable_rpc"
+  * The old shared_instance language should still work as expected though
+  * Added rpc_bind_host. It is not recommended to share the RPC onto a public
+    network, however listening outside of the host may be helpful in some debugging situations.
 
 ## Example syntax
 
 ```toml
 [reticulum]
 enable_transport = true
-share_instance = true
-shared_instance_port = 37428
-instance_control_port = 37429
+enable_rpc = true
+rpc_bind_host = "127.0.0.1"
+rpc_data_port = 37428
+rpc_control_port = 37429
 rpc_key = "somethingsecretmatchingpythonrnsd"
 instance_name = "default"
 respond_to_probes = true

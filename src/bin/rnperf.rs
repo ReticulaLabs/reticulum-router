@@ -162,14 +162,14 @@ fn load_ident() -> RResult<PrivateIdentity> {
 async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
     let mut tcfg = TransportConfig::new(APP_NAME, &id, false);
     tcfg.set_respond_to_probes(true);
-    tcfg.set_share_instance(true);
+    tcfg.set_rpc_instance(true);
     let t = Transport::new(tcfg);
-    let on_shared = t.is_connected_to_shared_instance().await;
-    if on_shared {
-        log::info!("rnperf: connected to local reticulum shared instance");
+    let on_rpc = t.rpc_connected().await;
+    if on_rpc {
+        log::info!("rnperf: connected to local reticulum instance over rpc");
         return Ok(t);
     }
-    bail!("could not connect to a shared reticulum instance (is reticulum-router running?)");
+    bail!("could not connect to local reticulum instance over rpc (is reticulum-router running?)");
 }
 
 // ── Protocol helpers ────────────────────────────────────────────────

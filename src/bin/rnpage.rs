@@ -112,12 +112,12 @@ fn load_ident(path: Option<&str>) -> RResult<PrivateIdentity> {
 async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
     let mut tcfg = TransportConfig::new(TOOL_NAME, &id, false);
     tcfg.set_respond_to_probes(true);
-    tcfg.set_share_instance(true);
+    tcfg.set_rpc_instance(true);
     let t = Transport::new(tcfg);
-    let on_shared = t.is_connected_to_shared_instance().await;
+    let on_rpc = t.rpc_connected().await;
     let mgr = t.iface_manager();
 
-    if on_shared {
+    if on_rpc {
         return Ok(t);
     }
 

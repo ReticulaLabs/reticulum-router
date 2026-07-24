@@ -167,19 +167,19 @@ fn load_allowed() -> Vec<AddressHash> {
 async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
     let mut tcfg = TransportConfig::new("rnsh", &id, false);
     tcfg.set_respond_to_probes(true);
-    tcfg.set_share_instance(true);
+    tcfg.set_rpc_instance(true);
     let t = Transport::new(tcfg);
-    let on_shared = t.is_connected_to_shared_instance().await;
+    let on_rpc = t.rpc_connected().await;
     let mgr = t.iface_manager();
 
-    if on_shared {
-        log::info!("rnsh: connected to local reticulum shared instance");
+    if on_rpc {
+        log::info!("rnsh: connected to local reticulum instance over rpc");
         return Ok(t);
     }
 
     // Load explicit interfaces from the Reticulum config only when
-    // running standalone (no shared instance). When connected to a
-    // running daemon via the shared instance, the daemon already
+    // running standalone (no rpc instance). When connected to a
+    // running daemon via the rpc instance, the daemon already
     // manages all network connectivity.
     if let Some(cfg) = load_cfg() {
         log::info!("rnsh: loading interfaces from reticulum config");
@@ -610,7 +610,7 @@ async fn initiator(a: &Args) -> RResult<i32> {
     // Resolve the listener's identity for link crypto verification.
     // The correct identity comes from the destination's announce, which
     // propagates through the Reticulum network. If the announce hasn't
-    // arrived yet (e.g. the shared instance doesn't replay cached
+    // arrived yet (e.g. the rpc instance doesn't replay cached
     // announces to new clients), proactively request it via a path
     // request.  On same-host setups where both rnsh instances connect to
     // the same daemon via TCP, announces don't propagate between clients,
