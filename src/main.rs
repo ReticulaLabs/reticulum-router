@@ -778,6 +778,35 @@ fn render_prometheus_metrics(
         metrics.total_pacing_wait_us
     ));
 
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_entries_in_backoff Number of client IPs currently within their reconnect backoff window, per backbone server.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_entries_in_backoff gauge\n");
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_total_tracked_ips Total number of client IPs tracked by the reconnect pacer, per backbone server.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_total_tracked_ips gauge\n");
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_initial_backoff_ms Initial reconnect backoff in milliseconds.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_initial_backoff_ms gauge\n");
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_max_backoff_ms Maximum reconnect backoff in milliseconds.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_max_backoff_ms gauge\n");
+
+    for rp in &metrics.reconnect_pacer_metrics {
+        let server = &rp.name;
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_entries_in_backoff{{server=\"{}\"}} {}\n",
+            server, rp.entries_in_backoff
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_total_tracked_ips{{server=\"{}\"}} {}\n",
+            server, rp.total_tracked_ips
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_initial_backoff_ms{{server=\"{}\"}} {}\n",
+            server, rp.initial_backoff_ms
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_max_backoff_ms{{server=\"{}\"}} {}\n",
+            server, rp.max_backoff_ms
+        ));
+    }
+
     output.push_str("# HELP reticulum_transport_metrics_last_collection_timestamp_seconds Unix timestamp of the last successful transport metrics collection.\n");
     output.push_str("# TYPE reticulum_transport_metrics_last_collection_timestamp_seconds gauge\n");
     if let Some(collected_at_seconds) = collected_at_seconds {
