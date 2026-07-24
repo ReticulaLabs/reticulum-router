@@ -14,6 +14,7 @@ const PY_CONN_WELCOME: &[u8] = b"#WELCOME#";
 const PY_CONN_FAILURE: &[u8] = b"#FAILURE#";
 const PY_CONN_AUTH_MAX_FRAME: usize = 256;
 const MAX_RPC_FRAME: usize = 1024 * 1024;
+const DEFAULT_CONTROL_HOST: &str = "127.0.0.1";
 const DEFAULT_CONTROL_PORT: u16 = 37429;
 const ADDRESS_HASH_SIZE: usize = 16;
 const MIN_RPC_KEY_BYTES: usize = 16; // minimum HMAC key length (32 hex chars)
@@ -30,16 +31,17 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    let port = parse_args()?;
+    let (host, port) = parse_args()?;
 
     let rpc_key = resolve_rpc_key()?;
-    let rpc = RpcConnection::new(port, rpc_key);
+    let rpc = RpcConnection::new(host, port, rpc_key);
 
     let mut server = McpServer { rpc };
     server.run()
 }
 
-fn parse_args() -> Result<u16, String> {
+fn parse_args() -> Result<(String, u16), String> {
+    let mut host = DEFAULT_CONTROL_HOST.to_string();
     let mut port = DEFAULT_CONTROL_PORT;
     let mut it = env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -52,6 +54,12 @@ fn parse_args() -> Result<u16, String> {
                 println!("rnmcp {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
+            "-H" | "--host" => {
+                let val = it
+                    .next()
+                    .ok_or_else(|| "--host requires a value".to_string())?;
+                host = val;
+            }
             "-p" | "--port" => {
                 let val = it
                     .next()
@@ -63,7 +71,7 @@ fn parse_args() -> Result<u16, String> {
             _ => return Err(format!("unrecognized argument: {arg}")),
         }
     }
-    Ok(port)
+    Ok((host, port))
 }
 
 fn print_help() {
@@ -75,6 +83,7 @@ fn print_help() {
     eprintln!("Usage: rnmcp [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
+    eprintln!("  -H, --host <host>   RPC control host (default: {DEFAULT_CONTROL_HOST})");
     eprintln!("  -p, --port <port>   RPC control port (default: {DEFAULT_CONTROL_PORT})");
     eprintln!("  -h, --help          Show this help");
     eprintln!("  --version           Show version");
@@ -118,17 +127,18 @@ fn resolve_rpc_key() -> Result<Vec<u8>, String> {
 // We create a fresh connection for every RPC call.
 
 struct RpcConnection {
+    host: String,
     port: u16,
     rpc_key: Vec<u8>,
 }
 
 impl RpcConnection {
-    fn new(port: u16, rpc_key: Vec<u8>) -> Self {
-        Self { port, rpc_key }
+    fn new(host: String, port: u16, rpc_key: Vec<u8>) -> Self {
+        Self { host, port, rpc_key }
     }
 
     fn send_rpc(&mut self, request: &Value) -> Result<Value, String> {
-        let addr = format!("127.0.0.1:{}", self.port);
+        let addr = format!("{}:{}", self.host, self.port);
         let mut stream = TcpStream::connect(&addr)
             .map_err(|e| format!("connect to {addr}: {e}"))?;
 
@@ -156,7 +166,7 @@ impl RpcConnection {
         destination_filter: &Option<Vec<u8>>,
         max_packets: usize,
     ) -> Result<Vec<Value>, String> {
-        let addr = format!("127.0.0.1:{}", self.port);
+        let addr = format!("{}:{}", self.host, self.port);
         let mut stream = TcpStream::connect(&addr)
             .map_err(|e| format!("connect to {addr}: {e}"))?;
 
