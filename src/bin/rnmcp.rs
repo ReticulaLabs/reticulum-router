@@ -1017,11 +1017,13 @@ impl McpServer {
             let if_type = map_get_str(map, "type").unwrap_or("?");
             let identity = map_get_bytes(map, "identity");
             let error_count = map_get_u64(map, "error_count").unwrap_or(0);
+            let mode = map_get_str(map, "mode").unwrap_or("full");
 
             let identity_hex = identity.map(hex_encode).unwrap_or_else(|| "?".to_string());
             output.push_str(&format!("  {if_name}\n"));
             output.push_str(&format!("    Type: {if_type}\n"));
             output.push_str(&format!("    Identity: {identity_hex}\n"));
+            output.push_str(&format!("    Mode: {mode}\n"));
             output.push_str(&format!("    Errors: {error_count}\n"));
         }
 
@@ -1174,7 +1176,7 @@ fn list_tools() -> Vec<JsonValue> {
         ]),
         json_obj(&[
             ("name", JsonValue::String("get_interfaces".into())),
-            ("description", JsonValue::String("List all active interfaces with type, name, identity, and error count.".into())),
+            ("description", JsonValue::String("List all active interfaces with type, name, identity, mode, and error count.".into())),
             ("inputSchema", json_obj(&[
                 ("type", JsonValue::String("object".into())),
                 ("properties", json_obj(&[])),
