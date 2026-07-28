@@ -62,7 +62,7 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
 * ❌ AX25KISSInterface
 * ✅ [Modem73Interface](https://github.com/RFnexus/modem73)
 * ✅ [RNodeInterface](https://unsigned.io/rnode/) (over Serial)
-* ✅ LoRaInterface (over SPI, SX126X or LR1121)
+* ✅ LoRaInterface (Experimental! over SPI, SX127X, SX126X or LR1121)
 * ❌ RNodeMultiInterface
 * ❌ KISSInterface
 
@@ -180,6 +180,15 @@ All tools and daemons support the RUST_LOG environment variable to set the log v
 * info -- All of the above and informational events
 * debug -- All of the above and debugging information
 * trace -- All of the above and traces of every packet
+
+# Implementation Tips
+
+## Mixing low-bitrate and high-bitrate interfaces on a single instance.
+
+When running low-bitrate interfaces (such as radio or serial) attached to high-bitrate interfaces (such as TCP), it is *strongly* recommended to place all high-bitrate interfaces into "boundary" mode, and low-bitrate interfaces into "internal" mode. This prevents broadcasts from the Reticulum network from flooding low-bitrate interfaces and making them unusable.
+
+You won't be able to "discover" random network nodes via broadcast announcements from low-bitrate devices, however you should be able to request a path to a specific destination hash.
+Low bitrate devices behind an internal interface though will be discoverable via the wider network.
 
 ## What LoRA frequency should I use?
 
