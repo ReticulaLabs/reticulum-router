@@ -19,6 +19,7 @@ use reticulum_sdk::iface::udp::UdpInterface;
 use reticulum_sdk::transport::{
     DiscoveryInterfaceConfig, Transport, TransportConfig, TransportMetrics,
 };
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::net::SocketAddr;
@@ -501,8 +502,18 @@ impl Daemon {
             }
         }
 
+        let interface_names: Arc<HashMap<AddressHash, String>> = Arc::new(
+            iface_manager
+                .lock()
+                .await
+                .interface_info_list()
+                .into_iter()
+                .map(|info| (info.address, info.name))
+                .collect(),
+        );
+
         let metrics_task = if config.metrics.enabled {
-            Some(spawn_metrics_server(config.metrics, transport.clone()).await?)
+            Some(spawn_metrics_server(config.metrics, transport.clone(), interface_names).await?)
         } else {
             None
         };
@@ -531,6 +542,7 @@ impl Daemon {
 async fn spawn_metrics_server(
     config: MetricsConfig,
     transport: Arc<Transport>,
+    interface_names: Arc<HashMap<AddressHash, String>>,
 ) -> io::Result<JoinHandle<()>> {
     let addr = format!("{}:{}", config.bind_host, config.bind_port);
     let listener = TcpListener::bind(&addr).await.map_err(|err| {
@@ -546,6 +558,7 @@ async fn spawn_metrics_server(
     let cached_body = Arc::new(RwLock::new(render_prometheus_metrics(
         TransportMetrics::default(),
         None,
+        &interface_names,
     )));
 
     Ok(tokio::spawn(async move {
@@ -561,7 +574,7 @@ async fn spawn_metrics_server(
                     match timeout(collection_timeout, transport.metrics()).await {
                         Ok(metrics) => {
                             let mut body = cached_body.write().await;
-                            *body = render_prometheus_metrics(metrics, unix_timestamp_seconds());
+                            *body = render_prometheus_metrics(metrics, unix_timestamp_seconds(), &interface_names);
                         }
                         Err(_) => {
                             log::warn!(
@@ -645,6 +658,7 @@ async fn write_http_response(
 fn render_prometheus_metrics(
     metrics: TransportMetrics,
     collected_at_seconds: Option<u64>,
+    interface_names: &HashMap<AddressHash, String>,
 ) -> String {
     let mut output = String::new();
 
@@ -669,31 +683,35 @@ fn render_prometheus_metrics(
 
     for iface in metrics.interface_queues.interfaces {
         let interface = iface.address.to_hex_string();
+        let interface_name = interface_names
+            .get(&iface.address)
+            .map(String::as_str)
+            .unwrap_or("remote");
         output.push_str(&format!(
-            "reticulum_transport_interface_tx_queue_length{{interface=\"{}\"}} {}\n",
-            interface, iface.tx
+            "reticulum_transport_interface_tx_queue_length{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.tx
         ));
         output.push_str(&format!(
-            "reticulum_transport_interface_announce_queue_length{{interface=\"{}\"}} {}\n",
-            interface, iface.announce
+            "reticulum_transport_interface_announce_queue_length{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.announce
         ));
         output.push_str(&format!(
-            "reticulum_transport_interface_packets_sent_total{{interface=\"{}\"}} {}\n",
-            interface, iface.packets_tx
+            "reticulum_transport_interface_packets_sent_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.packets_tx
         ));
         output.push_str(&format!(
-            "reticulum_transport_interface_pacing_wait_microseconds_total{{interface=\"{}\"}} {}\n",
-            interface, iface.pacing_wait_us
+            "reticulum_transport_interface_pacing_wait_microseconds_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.pacing_wait_us
         ));
         output.push_str(&format!(
-            "reticulum_transport_interface_pacing_interval_microseconds{{interface=\"{}\"}} {}\n",
-            interface, iface.last_pacing_interval_us
+            "reticulum_transport_interface_pacing_interval_microseconds{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.last_pacing_interval_us
         ));
         output.push_str("# HELP reticulum_transport_interface_channel_load Current channel load as a percentage × 1000 (e.g. 6.9% → 6900).\n");
         output.push_str("# TYPE reticulum_transport_interface_channel_load gauge\n");
         output.push_str(&format!(
-            "reticulum_transport_interface_channel_load{{interface=\"{}\"}} {}\n",
-            interface, iface.channel_load
+            "reticulum_transport_interface_channel_load{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.channel_load
         ));
     }
 
