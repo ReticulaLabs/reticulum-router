@@ -433,6 +433,10 @@ impl Daemon {
                             LoRaInterface::<SX1276>::new(lora_config),
                             LoRaInterface::<SX1276>::spawn,
                         ),
+                        "SX1261" => iface_manager.lock().await.spawn(
+                            LoRaInterface::<SX1262>::new(lora_config.with_sx1261_mode(true)),
+                            LoRaInterface::<SX1262>::spawn,
+                        ),
                         "SX1262" => iface_manager.lock().await.spawn(
                             LoRaInterface::<SX1262>::new(lora_config),
                             LoRaInterface::<SX1262>::spawn,
