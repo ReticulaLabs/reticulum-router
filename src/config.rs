@@ -215,9 +215,9 @@ pub enum InterfaceConfig {
         implicit_header: bool,
         #[serde(default)]
         iq_inverted: bool,
-        // On most SX1262 modules, DIO2 is wired to an RF switch control pin. We want it true
+        // On most modules, The DIO pins is wired to an RF switch control pin. We want it true
         #[serde(default = "default_true")]
-        dio2_rf_switch: bool,
+        dio_rf_switch: bool,
         #[serde(default)]
         tcxo_voltage: Option<f64>,
         #[serde(default = "default_spi_speed")]

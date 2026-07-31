@@ -391,7 +391,7 @@ impl Daemon {
                     crc_enabled,
                     implicit_header,
                     iq_inverted,
-                    dio2_rf_switch,
+                    dio_rf_switch,
                     tcxo_voltage,
                     spi_speed,
                     flow_control,
@@ -414,7 +414,7 @@ impl Daemon {
                     lora_config.crc_enabled = crc_enabled;
                     lora_config.implicit_header = implicit_header;
                     lora_config.iq_inverted = iq_inverted;
-                    lora_config.dio2_rf_switch = dio2_rf_switch;
+                    lora_config.dio_rf_switch = dio_rf_switch;
                     lora_config.tcxo_voltage = tcxo_voltage;
                     lora_config.spi_speed = spi_speed;
                     lora_config.flow_control = flow_control;
