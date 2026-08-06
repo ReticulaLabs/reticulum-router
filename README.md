@@ -152,6 +152,9 @@ mode = "internal"
 enabled = true
 chipset = "SX1262"
 spi_path = "/dev/spidev0.0"
+gpio_chip = "gpiochip2"
+busy_line = 0
+reset_line = 1
 frequency = 914875000
 bandwidth = 125000.0
 txpower = 14
@@ -182,6 +185,26 @@ All tools and daemons support the RUST_LOG environment variable to set the log v
 * trace -- All of the above and traces of every packet
 
 # Implementation Tips
+
+## Attaching hardware LoRa chipsets to the router
+
+Hardware direct-attach LoRa chipsets are experimental. They allow us to rapidly support new chipsets, and allow usage of Reticulum on embedded devices (Raspberry Pi Zero, etc) with minimal external hardware.
+
+It's recommended to use "self contained" devices like the RNode instead if you're not an advanced user.
+
+### Requirements
+
+* SPI Bus - Used for communication to chipsets
+  * A USB FT232H is a viable USB -> SPI adapter for x86 and other hosts without an SPI bus.
+  * A [functional](https://codeberg.org/kallisti5/ft232h-spi-driver) kerner driver for it.
+    * ```make ; sudo make modules_install```
+* GPIO Pins - Used for BUSY and RESET pin control
+  * Omitting the gpio_chip tells the reticulum-router to "guess" when the chip is done processing
+    commands via sleeps / delays. This is not as reliable or fast as using the BUSY pin via GPIO.
+  * Omitting the gpio_chip also means the sdk cannot "reset" a stalled LoRa modem. You may need to
+    periodically manually reset the chipset if a failure happens.
+  * A USB MCP2221A is a viable USB -> GPIO adapter for x86 and other hosts without a GPIO bus.
+  * ```echo "options hid_mcp2221 gpio_mode_enforce=1" | sudo tee /etc/modprobe.d/mcp2221.conf``` to make it work right
 
 ## Mixing low-bitrate and high-bitrate interfaces on a single instance.
 
