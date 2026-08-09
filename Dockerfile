@@ -13,6 +13,7 @@ COPY --from=BUILD /tmp/src/target/release/rnperf /usr/local/bin/rnperf
 COPY --from=BUILD /tmp/src/target/release/rnsh /usr/local/bin/rnsh
 COPY --from=BUILD /tmp/src/target/release/rnpage /usr/local/bin/rnpage
 COPY --from=BUILD /tmp/src/target/release/rnmcp /usr/local/bin/rnmcp
+COPY --from=BUILD /tmp/src/target/release/rngit /usr/local/bin/rngit
 ENTRYPOINT "/usr/local/bin/reticulum-router"
 EXPOSE 4242/tcp
 EXPOSE 4242/udp
