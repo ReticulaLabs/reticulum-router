@@ -17,6 +17,7 @@ toml = "1.0"
 nix = { version = "0.26", features = ["term", "signal", "ioctl", "fs", "process", "feature"] }
 libc = "0.2"
 bzip2 = "0.5"
+hex = "0.4"
 
 # Async IO
 tokio = { version = "1.44.2", features = ["full"] }

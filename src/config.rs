@@ -340,6 +340,7 @@ impl Default for MetricsConfig {
     }
 }
 
+#[allow(dead_code)]
 impl Config {
     /// convert_python_config converts the non-standard Python config to real toml
     fn convert_python_config(content: &str) -> String {
