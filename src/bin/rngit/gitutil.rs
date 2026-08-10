@@ -308,6 +308,9 @@ pub fn delete_ref(repo_path: &Path, ref_name: &str) -> GResult<()> {
     if !ref_name.starts_with("refs/") {
         return Err("invalid ref".into());
     }
+    if !ref_exists(repo_path, ref_name) {
+        return Err(format!("ref {ref_name} does not exist"));
+    }
     let del = git(repo_path, &["update-ref", "-d", ref_name])?;
     if !del.status.success() {
         return Err(format!(
@@ -343,6 +346,209 @@ pub fn create_repository(group_path: &Path, repo_name: &str, creator_hash: &str)
         return Err("could not set repository permissions".into());
     }
 
+    Ok(())
+}
+
+/// List local refs (heads and tags) of a working repository as `(sha, ref)`.
+pub fn local_refs(repo_path: &Path) -> GResult<Vec<(String, String)>> {
+    let out = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "--format",
+            "%(objectname) %(refname)",
+            "refs/heads",
+            "refs/tags",
+        ],
+    )?;
+    if !out.status.success() {
+        return Err(format!(
+            "git for-each-ref failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    parse_ref_lines(&out.stdout)
+}
+
+/// Parse `for-each-ref`-style `sha refname` lines.
+pub fn parse_ref_lines(bytes: &[u8]) -> GResult<Vec<(String, String)>> {
+    let mut refs = Vec::new();
+    for line in String::from_utf8_lossy(bytes).lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((sha, refname)) = line.split_once(' ') else {
+            continue;
+        };
+        if san_sha(sha).is_none() || refname.is_empty() {
+            continue;
+        }
+        refs.push((sha.to_string(), refname.to_string()));
+    }
+    Ok(refs)
+}
+
+/// Check whether `old` is an ancestor of `new` (for fast-forward checks).
+pub fn is_ancestor(repo_path: &Path, old: &str, new: &str) -> bool {
+    git(
+        repo_path,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            old,
+            new,
+        ],
+    )
+    .map(|out| out.status.success())
+    .unwrap_or(false)
+}
+
+/// Create a git bundle from the given refs, excluding objects the receiver
+/// already has (prerequisites). Errors when there is nothing to send.
+pub fn create_push_bundle(
+    repo_path: &Path,
+    bundle_path: &Path,
+    refs: &[String],
+    prerequisites: &[String],
+) -> GResult<()> {
+    if refs.is_empty() {
+        return Err("no refs to push".into());
+    }
+    let mut args: Vec<String> = vec![
+        "bundle".into(),
+        "create".into(),
+        "--no-progress".into(),
+        bundle_path.to_string_lossy().into_owned(),
+    ];
+    for r in refs {
+        let r = san_ref(r).ok_or("invalid ref")?;
+        args.push(r.to_string());
+    }
+    for p in prerequisites {
+        let p = san_sha(p).ok_or("invalid prerequisite SHA")?;
+        args.push(format!("^{p}"));
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let out = git(repo_path, &arg_refs)?;
+    if !out.status.success() {
+        return Err(format!(
+            "could not create bundle: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Initialize a new non-bare repository with an optional default branch.
+pub fn init_repository(dir: &Path, default_branch: Option<&str>) -> GResult<()> {
+    let mut args = vec!["init".to_string()];
+    if let Some(branch) = default_branch {
+        if !branch.is_empty() {
+            args.push("-b".into());
+            args.push(branch.to_string());
+        }
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let out = Command::new("git")
+        .args(&arg_refs)
+        .arg(dir)
+        .output()
+        .map_err(|e| format!("could not run git: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git init failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Fetch a bundle into a repository with the given refspecs.
+pub fn fetch_bundle(repo_path: &Path, bundle_path: &Path, refspecs: &[&str]) -> GResult<()> {
+    if refspecs.is_empty() {
+        return Err("no refspecs".into());
+    }
+    let mut args: Vec<String> = vec!["fetch".to_string()];
+    args.push(bundle_path.to_string_lossy().into_owned());
+    for r in refspecs {
+        args.push(r.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let out = git(repo_path, &arg_refs)?;
+    if !out.status.success() {
+        return Err(format!(
+            "bundle fetch failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Verify a bundle against the objects present in a repository.
+pub fn verify_bundle(repo_path: &Path, bundle_path: &Path) -> GResult<()> {
+    let out = git(
+        repo_path,
+        &["bundle", "verify", bundle_path.to_str().unwrap_or_default()],
+    )?;
+    if !out.status.success() {
+        return Err(format!(
+            "bundle verification failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Check out a branch in a working repository, creating it from origin if
+/// needed. Returns true when a checkout was performed.
+pub fn checkout_branch(repo_path: &Path, branch: &str) -> GResult<bool> {
+    let short = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+    if ref_exists(repo_path, &format!("refs/heads/{short}")) {
+        let out = git(repo_path, &["checkout", short])?;
+        if !out.status.success() {
+            return Err(format!(
+                "git checkout failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        return Ok(true);
+    }
+    let remote = format!("refs/remotes/origin/{short}");
+    if ref_exists(repo_path, &remote) {
+        let out = git(repo_path, &["checkout", "-b", short, &remote])?;
+        if !out.status.success() {
+            return Err(format!(
+                "git checkout failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Set a git config key in a repository.
+pub fn config_set(repo_path: &Path, key: &str, value: &str) -> GResult<()> {
+    let out = git(repo_path, &["config", key, value])?;
+    if !out.status.success() {
+        return Err(format!(
+            "git config failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Add a remote.
+pub fn remote_add(repo_path: &Path, name: &str, url: &str) -> GResult<()> {
+    let out = git(repo_path, &["remote", "add", name, url])?;
+    if !out.status.success() {
+        return Err(format!(
+            "git remote add failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
     Ok(())
 }
 

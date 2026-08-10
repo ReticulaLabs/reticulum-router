@@ -81,7 +81,11 @@ impl Rngit {
             tokio::select! {
                 res = in_ev.recv() => {
                     match res {
-                        Ok(data) => self.handle_event(transport.clone(), &mut links, data).await?,
+                        Ok(data) => {
+                            if let Err(e) = self.handle_event(transport.clone(), &mut links, data).await {
+                                log::error!("rngit: handler error: {e}");
+                            }
+                        }
                         Err(e) => {
                             log::error!("rngit: link event channel error: {e:?}");
                             return Ok(());
@@ -183,6 +187,7 @@ impl Rngit {
         link: Arc<Mutex<Link>>,
         rp: &LinkResourcePacket,
     ) -> TResult<()> {
+        log::debug!("rngit: resource context {:?}", rp.context);
         match rp.context {
             PacketContext::ResourceAdvertisement => {
                 let adv = ResourceAdvertisement::unpack(&rp.data)
@@ -240,14 +245,30 @@ impl Rngit {
             }
             PacketContext::Resource => {
                 let mut completed: Vec<Hash> = Vec::new();
+                let mut followup: Vec<Hash> = Vec::new();
                 {
                     let state = links.get_mut(link_id).ok_or("no link state")?;
                     for (hash, inbound) in state.inbound.iter_mut() {
-                        if transfer::receive_part(&mut inbound.resource, &rp.data)
-                            && inbound.resource.all_parts_received()
-                        {
-                            completed.push(*hash);
+                        if transfer::receive_part(&mut inbound.resource, &rp.data) {
+                            if inbound.resource.all_parts_received() {
+                                completed.push(*hash);
+                            } else if inbound.resource.outstanding_parts()
+                                < inbound.resource.window()
+                            {
+                                followup.push(*hash);
+                            }
                         }
+                    }
+                }
+                for hash in followup {
+                    let request_bytes = {
+                        let state = links.get_mut(link_id).ok_or("no link state")?;
+                        let inbound =
+                            state.inbound.get_mut(&hash).ok_or("no inbound resource")?;
+                        inbound.resource.build_request().ok()
+                    };
+                    if let Some(request_bytes) = request_bytes {
+                        transfer::send_part_request(&transport, &link, &request_bytes).await?;
                     }
                 }
                 for hash in completed {
@@ -879,6 +900,9 @@ impl Rngit {
         };
         if gitutil::san_ref(&ref_name).is_none() || !ref_name.starts_with("refs/") {
             return Self::invalid_request();
+        }
+        if !gitutil::ref_exists(&repo_path, &ref_name) {
+            return Self::error_response(transfer::RES_NOT_FOUND, "Not found");
         }
 
         match gitutil::delete_ref(&repo_path, &ref_name) {

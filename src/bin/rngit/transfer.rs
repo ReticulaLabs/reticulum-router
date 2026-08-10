@@ -125,6 +125,7 @@ pub async fn send_advertisement(
         .await
         .resource_packet(PacketContext::ResourceAdvertisement, &packed)
         .map_err(err)?;
+    log::debug!("rngit: sending advertisement packet {}B", packet.data.len());
     transport.send_packet(packet).await;
     Ok(())
 }
