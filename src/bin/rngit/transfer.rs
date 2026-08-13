@@ -268,6 +268,7 @@ pub fn new_response_resource(
         |plain, out_buf| l.encrypt(plain, out_buf).map(|s| s.len()).map_err(|e| e),
         request_id,
         true,
+        true,
     )
     .map_err(err)?;
     Ok(resource)

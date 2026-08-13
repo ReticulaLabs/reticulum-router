@@ -398,6 +398,7 @@ impl Client {
             |plain, out_buf| l.encrypt(plain, out_buf).map(|s| s.len()),
             Some(request_id),
             false,
+            true,
         )
         .map_err(err)?;
         Ok(resource)
