@@ -1,6 +1,6 @@
 [package]
 name = "reticulum-router"
-version = "1.9.15"
+version = "1.9.16"
 edition = "2024"
 
 [dependencies]

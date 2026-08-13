@@ -264,8 +264,8 @@ $ cargo build --release
 > Linux, Alpine based x86_64 and aarch64 containers are available
 
 ```
-docker pull ghcr.io/reticulalabs/reticulum-router:v1.9.15
-docker run -v reticulum_data:/root/.config/reticulum ghcr.io/reticulalabs/reticulum-router:v1.9.15
+docker pull ghcr.io/reticulalabs/reticulum-router:v1.9.16
+docker run -v reticulum_data:/root/.config/reticulum ghcr.io/reticulalabs/reticulum-router:v1.9.16
 ```
 
 /root/.config/reticulum will contain the following files:
