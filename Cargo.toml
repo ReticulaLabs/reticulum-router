@@ -1,6 +1,6 @@
 [package]
 name = "reticulum-router"
-version = "1.9.14"
+version = "1.9.15"
 edition = "2024"
 
 [dependencies]
@@ -20,9 +20,9 @@ bzip2 = "0.5"
 hex = "0.4"
 
 # Async IO
-tokio = { version = "1.44.2", features = ["full"] }
+tokio = { version = "1.53", features = ["full"] }
 tokio-stream = "0.1.17"
-tokio-util = "0.7.15"
+tokio-util = "0.7.19"
 
 # Logging
 log = "0.4"

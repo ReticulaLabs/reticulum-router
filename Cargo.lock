@@ -89,6 +89,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bzip2"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c"
+dependencies = [
+ "libbz2-rs-sys",
+]
+
+[[package]]
 name = "bzip2-sys"
 version = "0.1.13+1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -495,6 +504,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "libbz2-rs-sys"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -763,10 +778,10 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "reticulum-router"
-version = "1.9.14"
+version = "1.9.15"
 dependencies = [
  "base64",
- "bzip2",
+ "bzip2 0.5.2",
  "dirs",
  "ed25519-dalek",
  "env_logger",
@@ -789,11 +804,12 @@ dependencies = [
 
 [[package]]
 name = "reticulum-sdk"
-version = "2.2.14"
+version = "2.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c64d138bb9f81b76c91ec04a4ed6e0fff6638a7513734c8b51a4e0f45bf633cf"
+checksum = "d147daabfa2b1f0d22c9798f2d22ec699b5f6ce2ad82fef087286e7c97d8fbe4"
 dependencies = [
  "aes",
+ "bzip2 0.6.1",
  "cbc",
  "crypto-common 0.1.7",
  "ed25519-dalek",
