@@ -106,6 +106,12 @@ pub enum InterfaceConfig {
         bind_host: Option<String>,
         #[serde(default, alias = "remote")]
         target_host: Option<String>,
+        /// Optional data-pacing bitrate for the backbone in bits/sec. When
+        /// set, outbound packets are paced to this rate (matching the SDK
+        /// default of 1 Gbps). Set to `0` to disable pacing entirely on
+        /// fast, reliable links.
+        #[serde(default, alias = "pacing_bitrate")]
+        bitrate: Option<f64>,
     },
     UDPInterface {
         #[serde(default = "default_true", alias = "interface_enabled")]

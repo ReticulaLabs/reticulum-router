@@ -163,6 +163,13 @@ async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
     let mut tcfg = TransportConfig::new(APP_NAME, &id, false);
     tcfg.set_respond_to_probes(true);
     tcfg.set_rpc_instance(true);
+    // Allow overriding the RPC data/control ports for testing against a
+    // non-default local instance (e.g. a second router on the same host).
+    if let Ok(port) = std::env::var("RNPERF_RPC_PORT") {
+        let port: u16 = port.parse().map_err(|_| "bad RNPERF_RPC_PORT")?;
+        tcfg.set_rpc_data_port(port);
+        tcfg.set_rpc_control_port(port + 1);
+    }
     let t = Transport::new(tcfg);
     let on_rpc = t.rpc_connected().await;
     if on_rpc {

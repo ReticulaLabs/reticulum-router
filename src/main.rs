@@ -224,6 +224,7 @@ impl Daemon {
                     bind_host,
                     target_host,
                     port,
+                    bitrate,
                     ..
                 } => {
                     if (bind_host.is_some() && target_host.is_some())
@@ -244,8 +245,18 @@ impl Daemon {
                                 iface.name,
                                 addr
                             );
+                            let mut server = BackboneServer::new(addr, iface_manager.clone())
+                                .with_interface_mode(iface_mode);
+                            if let Some(bitrate) = bitrate {
+                                log::info!(
+                                    "Interface '{}': backbone pacing bitrate set to {} bps",
+                                    iface.name,
+                                    bitrate
+                                );
+                                server = server.with_bitrate(bitrate);
+                            }
                             let iface_addr = iface_manager.lock().await.spawn(
-                                BackboneServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode),
+                                server,
                                 BackboneServer::spawn,
                             );
                             if iface.discoverable {
@@ -279,10 +290,19 @@ impl Daemon {
                                 iface.name,
                                 addr
                             );
+                            let mut client = BackboneClient::new(addr).with_interface_mode(iface_mode);
+                            if let Some(bitrate) = bitrate {
+                                log::info!(
+                                    "Interface '{}': backbone pacing bitrate set to {} bps",
+                                    iface.name,
+                                    bitrate
+                                );
+                                client = client.with_bitrate(bitrate);
+                            }
                             iface_manager
                                 .lock()
                                 .await
-                                .spawn(BackboneClient::new(addr).with_interface_mode(iface_mode), BackboneClient::spawn);
+                                .spawn(client, BackboneClient::spawn);
                         }
                         None => ()
                     }
