@@ -4,6 +4,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rmpv::{Value, decode::read_value, encode::write_value};
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::env;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
@@ -57,42 +58,49 @@ fn run() -> Result<i32, String> {
 
     let rpc_key = resolve_rpc_key(&args)?;
 
-    let mut stream = connect_rpc(&args.host, args.port, &rpc_key)?;
+    let conn = Conn {
+        host: args.host.clone(),
+        port: args.port,
+        rpc_key,
+    };
+
+    // Fail fast if the instance is unreachable or rejects our RPC key.
+    let _ = conn.connect()?;
 
     if args.blackholed {
-        return do_blackholed(&mut stream, &args);
+        return do_blackholed(&conn, &args);
     }
 
     if args.blackhole {
-        return do_blackhole(&mut stream, &args);
+        return do_blackhole(&conn, &args);
     }
 
     if args.unblackhole {
-        return do_unblackhole(&mut stream, &args);
+        return do_unblackhole(&conn, &args);
     }
 
     if args.table {
-        return do_table(&mut stream, &args);
+        return do_table(&conn, &args);
     }
 
     if args.rates {
-        return do_rates(&mut stream, &args);
+        return do_rates(&conn, &args);
     }
 
     if args.drop {
-        return do_drop(&mut stream, &args);
+        return do_drop(&conn, &args);
     }
 
     if args.drop_announces {
-        return do_drop_announces(&mut stream);
+        return do_drop_announces(&conn);
     }
 
     if args.drop_via {
-        return do_drop_via(&mut stream, &args);
+        return do_drop_via(&conn, &args);
     }
 
     if let Some(dest) = &args.destination {
-        return do_path_info(&mut stream, dest, &args);
+        return do_path_info(&conn, dest, &args);
     }
 
     print_help();
@@ -214,6 +222,60 @@ fn resolve_rpc_key(args: &Args) -> Result<Vec<u8>, String> {
         return decode_hex(key);
     }
     Err("No RPC key specified. Use --rpc-key <hex> to provide the shared instance RPC key.".to_string())
+}
+
+/// Connection parameters for the shared instance RPC interface.
+///
+/// The server handles exactly one request per authenticated connection, so
+/// each RPC round-trip needs a fresh connection. `Conn` bundles the
+/// parameters needed to open one on demand.
+struct Conn {
+    host: String,
+    port: u16,
+    rpc_key: Vec<u8>,
+}
+
+impl Conn {
+    fn connect(&self) -> Result<TcpStream, String> {
+        connect_rpc(&self.host, self.port, &self.rpc_key)
+    }
+}
+
+/// Perform a single RPC request/response round-trip over a fresh connection.
+fn rpc_call(conn: &Conn, request: &Value) -> Result<Value, String> {
+    let mut stream = conn.connect()?;
+    send_rpc_request(&mut stream, request)
+}
+
+/// Map interface address hashes to human-readable interface names by
+/// querying the `interfaces` RPC. Falls back to an empty map when the
+/// instance does not support it.
+fn interface_names(conn: &Conn) -> HashMap<Vec<u8>, String> {
+    let request = Value::Map(vec![(Value::from("get"), Value::from("interfaces"))]);
+    match rpc_call(conn, &request) {
+        Ok(Value::Array(list)) => list
+            .iter()
+            .filter_map(|entry| {
+                let map = entry.as_map()?;
+                let address = map_get_bytes(map, "identity")?.to_vec();
+                let name = map_get_str(map, "name")?.to_string();
+                Some((address, name))
+            })
+            .collect(),
+        _ => HashMap::new(),
+    }
+}
+
+/// Render an interface address from a path entry as its name when known,
+/// falling back to the raw hash.
+fn format_iface(iface: Option<&[u8]>, names: &HashMap<Vec<u8>, String>) -> String {
+    if let Some(bytes) = iface {
+        if let Some(name) = names.get(bytes) {
+            return name.clone();
+        }
+        return pretty_hex(bytes);
+    }
+    "?".to_string()
 }
 
 fn connect_rpc(host: &str, port: u16, rpc_key: &[u8]) -> Result<TcpStream, String> {
@@ -359,11 +421,11 @@ fn send_rpc_request(stream: &mut TcpStream, request: &Value) -> Result<Value, St
     Ok(response)
 }
 
-fn do_table(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_table(conn: &Conn, args: &Args) -> Result<i32, String> {
     let request = Value::Map(vec![
         (Value::from("get"), Value::from("path_table")),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     let entries = response.as_array()
         .ok_or_else(|| "Invalid response: expected array".to_string())?;
@@ -384,6 +446,7 @@ fn do_table(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     let dest_filter = args.destination.as_ref();
     let max_hops = args.max_hops;
 
+    let names = interface_names(conn);
     let mut displayed = 0;
     for entry in entries {
         let map = match entry.as_map() {
@@ -417,21 +480,24 @@ fn do_table(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
 
         let hash_str = hash.as_ref().map(|h| pretty_hex(h)).unwrap_or_default();
         let via_str = via.as_ref().map(|h| pretty_hex(h)).unwrap_or_default();
-        let iface_str = iface.as_ref().map(|h| pretty_hex(h)).unwrap_or_default();
+        let iface_str = format_iface(iface, &names);
         let expires_str = pretty_duration(expires_secs);
 
         let hop_str = if hops == 1 { " hop" } else { " hops" };
         print!("{hash_str} is {hops}{hop_str} away via {via_str} on {iface_str} expires {expires_str}");
 
         // Render first-hop radio signal if relevant
-        let snr = fetch_snr(stream).unwrap_or(None);
-        let rssi = fetch_rssi(stream).unwrap_or(None);
+        let snr = fetch_snr(conn).unwrap_or(None);
+        let rssi = fetch_rssi(conn).unwrap_or(None);
         if snr.is_some() || rssi.is_some() {
             print!(" (via radio: ");
             if let Some(snr_value) = snr {
                 print!("SNR: {snr_value:.1} dB");
             }
             if let Some(rssi_value) = rssi {
+                if snr.is_some() {
+                    print!(" ");
+                }
                 print!("RSSI: {rssi_value} dBm");
             }
             print!(")");
@@ -447,11 +513,11 @@ fn do_table(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     Ok(0)
 }
 
-fn do_rates(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_rates(conn: &Conn, args: &Args) -> Result<i32, String> {
     let request = Value::Map(vec![
         (Value::from("get"), Value::from("rate_table")),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     let entries = response.as_array()
         .ok_or_else(|| "Invalid response: expected array".to_string())?;
@@ -519,7 +585,7 @@ fn do_rates(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     Ok(0)
 }
 
-fn do_drop(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_drop(conn: &Conn, args: &Args) -> Result<i32, String> {
     let dest = args.destination.as_ref().unwrap();
     let dest_bytes = decode_hex(dest)?;
     if dest_bytes.len() != ADDRESS_HASH_SIZE {
@@ -531,7 +597,7 @@ fn do_drop(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
         (Value::from("drop"), Value::from("path")),
         (Value::from("destination_hash"), Value::Binary(dest_bytes)),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     if response.as_bool().unwrap_or(false) {
         println!("Dropped path to {dest_hex}");
@@ -542,17 +608,17 @@ fn do_drop(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     }
 }
 
-fn do_drop_announces(stream: &mut TcpStream) -> Result<i32, String> {
+fn do_drop_announces(conn: &Conn) -> Result<i32, String> {
     let request = Value::Map(vec![
         (Value::from("drop"), Value::from("announce_queues")),
     ]);
-    send_rpc_request(stream, &request)?;
+    rpc_call(conn, &request)?;
 
     println!("Dropped announce queues on all interfaces");
     Ok(0)
 }
 
-fn do_drop_via(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_drop_via(conn: &Conn, args: &Args) -> Result<i32, String> {
     let dest = args.destination.as_ref().unwrap();
     let dest_bytes = decode_hex(dest)?;
     if dest_bytes.len() != ADDRESS_HASH_SIZE {
@@ -564,18 +630,18 @@ fn do_drop_via(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
         (Value::from("drop"), Value::from("all_via")),
         (Value::from("destination_hash"), Value::Binary(dest_bytes)),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     let count = response.as_u64().unwrap_or(0);
     println!("Dropped {count} paths via {dest_hex}");
     Ok(0)
 }
 
-fn do_blackholed(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_blackholed(conn: &Conn, args: &Args) -> Result<i32, String> {
     let request = Value::Map(vec![
         (Value::from("get"), Value::from("blackholed_identities")),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     let map = response.as_map()
         .ok_or_else(|| "Invalid response".to_string())?;
@@ -632,7 +698,7 @@ fn do_blackholed(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     Ok(0)
 }
 
-fn do_blackhole(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_blackhole(conn: &Conn, args: &Args) -> Result<i32, String> {
     let dest = args.destination.as_ref().unwrap();
     let dest_bytes = decode_hex(dest)?;
     if dest_bytes.len() != ADDRESS_HASH_SIZE {
@@ -653,7 +719,7 @@ fn do_blackhole(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     }
 
     let request = Value::Map(map);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     if response.as_bool().unwrap_or(false) {
         println!("Blackholed identity {dest}");
@@ -664,7 +730,7 @@ fn do_blackhole(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     }
 }
 
-fn do_unblackhole(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
+fn do_unblackhole(conn: &Conn, args: &Args) -> Result<i32, String> {
     let dest = args.destination.as_ref().unwrap();
     let dest_bytes = decode_hex(dest)?;
     if dest_bytes.len() != ADDRESS_HASH_SIZE {
@@ -674,7 +740,7 @@ fn do_unblackhole(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     let request = Value::Map(vec![
         (Value::from("unblackhole_identity"), Value::Binary(dest_bytes)),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
 
     if response.as_bool().unwrap_or(false) {
         println!("Lifted blackhole for identity {dest}");
@@ -685,47 +751,69 @@ fn do_unblackhole(stream: &mut TcpStream, args: &Args) -> Result<i32, String> {
     }
 }
 
-fn do_path_info(stream: &mut TcpStream, dest: &str, args: &Args) -> Result<i32, String> {
-    let _ = args;
+fn do_path_info(conn: &Conn, dest: &str, _args: &Args) -> Result<i32, String> {
     let dest_bytes = decode_hex(dest)?;
     if dest_bytes.len() != ADDRESS_HASH_SIZE {
         return Err("Invalid destination hash length".to_string());
     }
+    let dest_hex = pretty_hex(&dest_bytes);
 
-    let request = Value::Map(vec![
-        (Value::from("get"), Value::from("request_path")),
-        (Value::from("destination_hash"), Value::Binary(dest_bytes)),
-    ]);
-    let response = send_rpc_request(stream, &request)?;
+    // Prefer an already-known path: display it without re-broadcasting a
+    // path request (matches Python rnpath's has_path() short-circuit).
+    let path_map = match lookup_path_entry(conn, &dest_bytes) {
+        Some(entry) => entry,
+        None => {
+            let request = Value::Map(vec![
+                (Value::from("get"), Value::from("request_path")),
+                (Value::from("destination_hash"), Value::Binary(dest_bytes)),
+            ]);
+            let response = rpc_call(conn, &request)?;
+            match response.as_map() {
+                Some(map) => map.clone(),
+                None => return Err("Invalid response from request_path".to_string()),
+            }
+        }
+    };
 
-    let map = response.as_map()
-        .ok_or_else(|| "Invalid response".to_string())?;
+    if map_get_bool(&path_map, "found").unwrap_or(false)
+        || map_get_bytes(&path_map, "hash").is_some()
+    {
+        let names = interface_names(conn);
 
-    if map_get_bool(map, "found").unwrap_or(false) {
-        let hops = map_get_u64(map, "hops").unwrap_or(1);
-        let next_hop = map_get_bytes(map, "next_hop");
-        let iface = map_get_bytes(map, "interface");
+        let hops = map_get_u64(&path_map, "hops").unwrap_or(1);
+        let via = map_get_bytes(&path_map, "next_hop").or_else(|| map_get_bytes(&path_map, "via"));
+        let iface = map_get_bytes(&path_map, "interface");
+        let expires = map_get_f64(&path_map, "expires");
 
         let hop_str = if hops == 1 { " hop" } else { " hops" };
-        if let Some(nh) = next_hop {
-            let iface_str = iface.map(pretty_hex).unwrap_or_else(|| "?".to_string());
+        if let Some(nh) = via {
+            let iface_str = format_iface(iface, &names);
             print!(
-                "Path found, destination is {hops}{hop_str} away via {} on {iface_str}",
+                "Path found, destination {dest_hex} is {hops}{hop_str} away via {} on {iface_str}",
                 pretty_hex(nh),
             );
         } else {
-            print!("Path found, destination is {hops}{hop_str} away");
+            print!("Path found, destination {dest_hex} is {hops}{hop_str} away");
+        }
+
+        if let Some(exp) = expires {
+            if exp > 0.0 {
+                print!(" expires {}", pretty_duration(exp));
+            }
         }
 
         // Render first-hop radio signal if relevant
-        let snr = fetch_snr(stream).unwrap_or(None);
-        let rssi = fetch_rssi(stream).unwrap_or(None);
+        let snr = fetch_snr(conn).unwrap_or(None);
+        let rssi = fetch_rssi(conn).unwrap_or(None);
         if snr.is_some() || rssi.is_some() {
             print!(" (via radio: ");
             if let Some(snr_value) = snr {
                 print!("SNR: {snr_value:.1} dB");
             }
             if let Some(rssi_value) = rssi {
+                if snr.is_some() {
+                    print!(" ");
+                }
                 print!("RSSI: {rssi_value} dBm");
             }
             print!(")");
@@ -736,6 +824,20 @@ fn do_path_info(stream: &mut TcpStream, dest: &str, args: &Args) -> Result<i32, 
         println!("No path known");
         Ok(1)
     }
+}
+
+/// Look up the path-table entry for `dest`, if one is currently known.
+fn lookup_path_entry(conn: &Conn, dest: &[u8]) -> Option<Vec<(Value, Value)>> {
+    let request = Value::Map(vec![(Value::from("get"), Value::from("path_table"))]);
+    let response = rpc_call(conn, &request).ok()?;
+    let entries = response.as_array()?;
+    for entry in entries {
+        let map = entry.as_map()?;
+        if map_get_bytes(map, "hash") == Some(dest) {
+            return Some(map.clone());
+        }
+    }
+    None
 }
 
 // ── Helpers ──
@@ -770,19 +872,19 @@ fn map_get_str<'a>(map: &'a [(Value, Value)], key: &str) -> Option<&'a str> {
     })
 }
 
-fn fetch_snr(stream: &mut TcpStream) -> Result<Option<f64>, String> {
+fn fetch_snr(conn: &Conn) -> Result<Option<f64>, String> {
     let request = Value::Map(vec![
         (Value::from("get"), Value::from("packet_snr")),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
     Ok(response.as_f64())
 }
 
-fn fetch_rssi(stream: &mut TcpStream) -> Result<Option<i64>, String> {
+fn fetch_rssi(conn: &Conn) -> Result<Option<i64>, String> {
     let request = Value::Map(vec![
         (Value::from("get"), Value::from("packet_rssi")),
     ]);
-    let response = send_rpc_request(stream, &request)?;
+    let response = rpc_call(conn, &request)?;
     Ok(response.as_i64())
 }
 
