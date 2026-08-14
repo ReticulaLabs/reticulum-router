@@ -201,6 +201,22 @@ async fn send_result_message(
     Ok(())
 }
 
+/// Drain and discard any pending out-link events (message proofs). The
+/// transport posts a `LinkEvent::Proof` for every packet the peer
+/// acknowledges; rnperf does not consume those, and leaving them unread
+/// during the high-rate data phase overflows the link event channel.
+fn drain_out_link_events(
+    recv: &mut tokio::sync::broadcast::Receiver<reticulum_sdk::destination::link::LinkEventData>,
+) {
+    loop {
+        match recv.try_recv() {
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+            Err(_) => break,
+        }
+    }
+}
+
 fn pack_version() -> Vec<u8> {
     let v = Value::Array(vec![
         Value::from(env!("CARGO_PKG_VERSION")),
@@ -478,13 +494,10 @@ async fn handle_session(
     let mut bytes_received: u64 = 0;
     let mut packets_received: u64 = 0;
     let mut first_data_time: Option<Instant> = None;
-    // Fires once the data phase (plus a drain grace) is expected to be over,
-    // so results can be delivered proactively if the initiator's result
-    // request is lost or rejected. Set when the first data packet arrives;
-    // a far-future sentinel disables the branch until then and after it fires.
-    let mut data_deadline = tokio::time::Instant::now() + Duration::from_secs(86400 * 365);
     // Generous overall budget so a congested link can drain its backlog
-    // before the session is torn down.
+    // before the session is torn down. The initiator's result request is
+    // delivered in channel-sequence order (after the data backlog), so the
+    // response below reflects the final packet count.
     let session_deadline =
         Instant::now() + Duration::from_secs_f64(test_duration.max(10.0) * 2.0 + 45.0);
     let mut results_sent = false;
@@ -501,8 +514,6 @@ async fn handle_session(
                                 packets_received += 1;
                                 if first_data_time.is_none() {
                                     first_data_time = Some(Instant::now());
-                                    data_deadline = tokio::time::Instant::now()
-                                        + Duration::from_secs_f64(test_duration + 10.0);
                                 }
                             }
                         }
@@ -532,25 +543,10 @@ async fn handle_session(
                     Err(_) => break,
                 }
             }
-            _ = tokio::time::sleep_until(data_deadline) => {
-                // The data phase should be over. If the initiator's request
-                // never made it through, deliver the results proactively so
-                // the initiator is not left hanging.
-                if !results_sent && packets_received > 0 {
-                    send_result_message(
-                        &link_arc,
-                        &transport,
-                        test_duration,
-                        bytes_received,
-                        packets_received,
-                        first_data_time,
-                    ).await?;
-                    results_sent = true;
-                    log::info!("rnperf: test data complete, sent result proactively: received {packets_received} packets, {bytes_received} bytes");
-                }
-                data_deadline = tokio::time::Instant::now() + Duration::from_secs(86400 * 365);
-            }
             _ = tokio::time::sleep_until(tokio::time::Instant::from_std(session_deadline)) => {
+                // Final fallback: if the initiator's result request never made
+                // it through, deliver whatever we have so it is not left
+                // hanging. By this point the backlog has long since drained.
                 if !results_sent && packets_received > 0 {
                     send_result_message(
                         &link_arc,
@@ -719,6 +715,10 @@ async fn initiator(a: &Args) -> RResult<()> {
         seq = seq.wrapping_add(1);
 
         if total_packets_sent % burst_size == 0 {
+            // Keep the out-link event channel from overflowing: one proof
+            // event per acknowledged packet is posted, and it is only safe
+            // to let them accumulate if we consume them.
+            drain_out_link_events(&mut out_ev);
             let elapsed = burst_start.elapsed();
             if elapsed < burst_sleep {
                 tokio::time::sleep(burst_sleep - elapsed).await;
@@ -727,6 +727,7 @@ async fn initiator(a: &Args) -> RResult<()> {
         }
     }
     let send_elapsed = start.elapsed();
+    drain_out_link_events(&mut out_ev);
 
     log::info!("rnperf: sent {total_packets_sent} packets ({total_bytes_sent} bytes) in {send_elapsed:?}");
 
