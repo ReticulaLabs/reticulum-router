@@ -182,6 +182,25 @@ async fn send_channel(
     Ok(())
 }
 
+/// Send the listener's test statistics back to the initiator as a
+/// `MSG_TYPE_RESULT` channel message.
+async fn send_result_message(
+    link: &Arc<Mutex<Link>>,
+    transport: &Transport,
+    test_duration: f64,
+    bytes_received: u64,
+    packets_received: u64,
+    first_data_time: Option<Instant>,
+) -> RResult<()> {
+    let recv_duration_ns = match first_data_time {
+        Some(t0) => Instant::now().duration_since(t0).as_nanos() as u64,
+        None => Duration::from_secs_f64(test_duration).as_nanos() as u64,
+    };
+    let result = pack_result(bytes_received, packets_received, recv_duration_ns);
+    send_channel(link, transport, MSG_TYPE_RESULT, &result).await?;
+    Ok(())
+}
+
 fn pack_version() -> Vec<u8> {
     let v = Value::Array(vec![
         Value::from(env!("CARGO_PKG_VERSION")),
@@ -459,7 +478,16 @@ async fn handle_session(
     let mut bytes_received: u64 = 0;
     let mut packets_received: u64 = 0;
     let mut first_data_time: Option<Instant> = None;
-    let session_deadline = Instant::now() + Duration::from_secs_f64(test_duration + 15.0);
+    // Fires once the data phase (plus a drain grace) is expected to be over,
+    // so results can be delivered proactively if the initiator's result
+    // request is lost or rejected. Set when the first data packet arrives;
+    // a far-future sentinel disables the branch until then and after it fires.
+    let mut data_deadline = tokio::time::Instant::now() + Duration::from_secs(86400 * 365);
+    // Generous overall budget so a congested link can drain its backlog
+    // before the session is torn down.
+    let session_deadline =
+        Instant::now() + Duration::from_secs_f64(test_duration.max(10.0) * 2.0 + 45.0);
+    let mut results_sent = false;
 
     loop {
         tokio::select! {
@@ -473,19 +501,25 @@ async fn handle_session(
                                 packets_received += 1;
                                 if first_data_time.is_none() {
                                     first_data_time = Some(Instant::now());
+                                    data_deadline = tokio::time::Instant::now()
+                                        + Duration::from_secs_f64(test_duration + 10.0);
                                 }
                             }
                         }
                         LinkEvent::Channel(ch) if ch.msg_type == MSG_TYPE_RESULT => {
-                            // Initiator requested results: send back our stats
-                            let recv_duration_ns = match first_data_time {
-                                Some(t0) => Instant::now().duration_since(t0).as_nanos() as u64,
-                                None => Duration::from_secs_f64(test_duration).as_nanos() as u64,
-                            };
-                            let result = pack_result(bytes_received, packets_received, recv_duration_ns);
-                            send_channel(&link_arc, &transport, MSG_TYPE_RESULT, &result).await?;
+                            // Initiator requested results: send back our stats.
+                            // Keep the session open so a result that gets lost
+                            // can be re-sent if the initiator retries.
+                            send_result_message(
+                                &link_arc,
+                                &transport,
+                                test_duration,
+                                bytes_received,
+                                packets_received,
+                                first_data_time,
+                            ).await?;
+                            results_sent = true;
                             log::info!("rnperf: test complete: received {packets_received} packets, {bytes_received} bytes");
-                            break;
                         }
                         LinkEvent::Closed => break,
                         _ => {}
@@ -498,8 +532,38 @@ async fn handle_session(
                     Err(_) => break,
                 }
             }
+            _ = tokio::time::sleep_until(data_deadline) => {
+                // The data phase should be over. If the initiator's request
+                // never made it through, deliver the results proactively so
+                // the initiator is not left hanging.
+                if !results_sent && packets_received > 0 {
+                    send_result_message(
+                        &link_arc,
+                        &transport,
+                        test_duration,
+                        bytes_received,
+                        packets_received,
+                        first_data_time,
+                    ).await?;
+                    results_sent = true;
+                    log::info!("rnperf: test data complete, sent result proactively: received {packets_received} packets, {bytes_received} bytes");
+                }
+                data_deadline = tokio::time::Instant::now() + Duration::from_secs(86400 * 365);
+            }
             _ = tokio::time::sleep_until(tokio::time::Instant::from_std(session_deadline)) => {
-                log::info!("rnperf: session timed out after {test_duration}s, received {packets_received} packets, {bytes_received} bytes");
+                if !results_sent && packets_received > 0 {
+                    send_result_message(
+                        &link_arc,
+                        &transport,
+                        test_duration,
+                        bytes_received,
+                        packets_received,
+                        first_data_time,
+                    ).await?;
+                    log::info!("rnperf: session timed out, sent result proactively: received {packets_received} packets, {bytes_received} bytes");
+                } else {
+                    log::info!("rnperf: session timed out after {test_duration}s, received {packets_received} packets, {bytes_received} bytes");
+                }
                 break;
             }
         }
@@ -677,7 +741,9 @@ async fn initiator(a: &Args) -> RResult<()> {
     let mut recv_packets: u64 = 0;
     let mut recv_duration_ns: u64 = 0;
     let mut got_result = false;
-    let result_deadline = Instant::now() + Duration::from_secs(30);
+    // Generous budget so results sent after a congested backlog drains (or
+    // delivered proactively by the listener) still have time to arrive.
+    let result_deadline = Instant::now() + Duration::from_secs(60);
     let mut retry_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(3),
         Duration::from_secs(3),
