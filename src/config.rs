@@ -73,6 +73,11 @@ pub struct NamedInterface {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub height: Option<f64>,
+    /// Interface gravity: preferred for path selection when the same
+    /// destination is heard on multiple interfaces at the same hop count.
+    /// Higher gravity wins; a bitrate tie-break applies when gravity is equal.
+    #[serde(default)]
+    pub gravity: Option<i64>,
     #[serde(flatten)]
     pub config: InterfaceConfig,
 }
@@ -514,6 +519,7 @@ impl Config {
                 latitude: None,
                 longitude: None,
                 height: None,
+                gravity: None,
                 config: InterfaceConfig::TCPServerInterface {
                     enabled: true,
                     bind_host: "127.0.0.1".to_string(),

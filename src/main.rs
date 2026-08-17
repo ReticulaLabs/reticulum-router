@@ -182,7 +182,7 @@ impl Daemon {
                         addr
                     );
                     let iface_addr = iface_manager.lock().await.spawn(
-                        TcpServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode),
+                        TcpServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)),
                         TcpServer::spawn,
                     );
                     if iface.discoverable {
@@ -218,7 +218,7 @@ impl Daemon {
                     iface_manager
                         .lock()
                         .await
-                        .spawn(TcpClient::new(addr).with_interface_mode(iface_mode), TcpClient::spawn);
+                        .spawn(TcpClient::new(addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)), TcpClient::spawn);
                 }
                 InterfaceConfig::BackboneInterface {
                     bind_host,
@@ -246,7 +246,8 @@ impl Daemon {
                                 addr
                             );
                             let mut server = BackboneServer::new(addr, iface_manager.clone())
-                                .with_interface_mode(iface_mode);
+                                .with_interface_mode(iface_mode)
+                                .with_gravity(iface.gravity.unwrap_or(0));
                             if let Some(bitrate) = bitrate {
                                 log::info!(
                                     "Interface '{}': backbone pacing bitrate set to {} bps",
@@ -290,7 +291,7 @@ impl Daemon {
                                 iface.name,
                                 addr
                             );
-                            let mut client = BackboneClient::new(addr).with_interface_mode(iface_mode);
+                            let mut client = BackboneClient::new(addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0));
                             if let Some(bitrate) = bitrate {
                                 log::info!(
                                     "Interface '{}': backbone pacing bitrate set to {} bps",
@@ -323,7 +324,7 @@ impl Daemon {
                         forward_addr
                     );
                     iface_manager.lock().await.spawn(
-                        UdpInterface::new(bind_addr, Some(forward_addr)).with_interface_mode(iface_mode),
+                        UdpInterface::new(bind_addr, Some(forward_addr)).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)),
                         UdpInterface::spawn,
                     );
                 }
@@ -357,7 +358,7 @@ impl Daemon {
                     let iface_addr = iface_manager
                         .lock()
                         .await
-                        .spawn(RNodeInterface::new(rnode_config).with_interface_mode(iface_mode), RNodeInterface::spawn);
+                        .spawn(RNodeInterface::new(rnode_config).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)), RNodeInterface::spawn);
                     if iface.discoverable {
                         let mut discovery_config = DiscoveryInterfaceConfig::rnode(
                             &iface.name,
@@ -390,7 +391,7 @@ impl Daemon {
                         control_addr
                     );
                     iface_manager.lock().await.spawn(
-                        Modem73Interface::new(target_addr, control_addr).with_interface_mode(iface_mode),
+                        Modem73Interface::new(target_addr, control_addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)),
                         Modem73Interface::spawn,
                     );
                 }
