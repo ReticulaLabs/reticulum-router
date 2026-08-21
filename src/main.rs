@@ -825,6 +825,12 @@ fn render_prometheus_metrics(
     output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_entries_in_backoff gauge\n");
     output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_total_tracked_ips Total number of client IPs tracked by the reconnect pacer, per backbone server.\n");
     output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_total_tracked_ips gauge\n");
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_blocked_ips Number of client IPs blocklisted for exceeding the reconnect rejection threshold, per backbone server.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_blocked_ips gauge\n");
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_block_threshold Number of reconnect rejections from a single IP that triggers a blocklist.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_block_threshold gauge\n");
+    output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_block_expiry_secs Duration in seconds a blocklist remains effective before it expires.\n");
+    output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_block_expiry_secs gauge\n");
     output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_initial_backoff_ms Initial reconnect backoff in milliseconds.\n");
     output.push_str("# TYPE reticulum_transport_backbone_reconnect_pacer_initial_backoff_ms gauge\n");
     output.push_str("# HELP reticulum_transport_backbone_reconnect_pacer_max_backoff_ms Maximum reconnect backoff in milliseconds.\n");
@@ -839,6 +845,18 @@ fn render_prometheus_metrics(
         output.push_str(&format!(
             "reticulum_transport_backbone_reconnect_pacer_total_tracked_ips{{server=\"{}\"}} {}\n",
             server, rp.total_tracked_ips
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_blocked_ips{{server=\"{}\"}} {}\n",
+            server, rp.blocked_ips
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_block_threshold{{server=\"{}\"}} {}\n",
+            server, rp.block_threshold
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_backbone_reconnect_pacer_block_expiry_secs{{server=\"{}\"}} {}\n",
+            server, rp.block_expiry_secs
         ));
         output.push_str(&format!(
             "reticulum_transport_backbone_reconnect_pacer_initial_backoff_ms{{server=\"{}\"}} {}\n",
