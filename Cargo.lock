@@ -118,9 +118,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.3"
+version = "1.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "509591b7bcd67f4ef775afad7662703b4935daaa6ec0e5605cfb1090b32a2b6d"
+checksum = "0ad534f4357a5264cce5019c989cf66a4f0dc4e0d1b1d15f8aacec0ff7360273"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -778,7 +778,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "reticulum-router"
-version = "1.10.6"
+version = "1.10.7"
 dependencies = [
  "base64",
  "bzip2 0.5.2",
@@ -804,9 +804,9 @@ dependencies = [
 
 [[package]]
 name = "reticulum-sdk"
-version = "2.2.26"
+version = "2.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc6956dc344e8b351304c2ed238f254a8ea4b3883c2aca70d4845589587cf161"
+checksum = "270db68b1b8eaf754dba92667acebb08086528dac0fc0487866038613eb8658b"
 dependencies = [
  "aes",
  "bzip2 0.6.1",
