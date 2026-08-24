@@ -34,6 +34,8 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
   * Announces and serves documents such as [Micron](https://github.com/RFnexus/micron-parser-js) pages over Reticulum
 * `rnmcp` - MCP connector for the RPC control port
   * Probably a horrific idea
+* `rnsniff` - Reticulum announcement sniffer.
+  * Listens for raw announcements on the network and attempt to decode them
 * `rngit` - Experimental git server / client over reticulum
   * Work in progress, not ready for use yet
 

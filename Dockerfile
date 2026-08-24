@@ -15,6 +15,7 @@ COPY --from=BUILD /tmp/src/target/release/rnpage /usr/local/bin/rnpage
 COPY --from=BUILD /tmp/src/target/release/rnmcp /usr/local/bin/rnmcp
 COPY --from=BUILD /tmp/src/target/release/rngit /usr/local/bin/rngit
 COPY --from=BUILD /tmp/src/target/release/git-remote-rns /usr/local/bin/git-remote-rns
+COPY --from=BUILD /tmp/src/target/release/rnsniff /usr/local/bin/rnsniff
 ENTRYPOINT "/usr/local/bin/reticulum-router"
 EXPOSE 4242/tcp
 EXPOSE 4242/udp
