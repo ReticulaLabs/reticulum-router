@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 const APP_NAME: &str = "nomadnetwork";
 const APP_ASPECT: &str = "node";
 const TOOL_NAME: &str = "rnpage";
+const DEFAULT_ANNOUNCE: u64 = 600;
 
 type RResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -217,7 +218,7 @@ fn serve_file(path: &Path) -> Vec<u8> {
     }
 }
 
-async fn listener(node_name: &str) -> RResult<()> {
+async fn listener(node_name: &str, announce_interval: u64) -> RResult<()> {
     let ident = load_ident(None)?;
     let mut transport = make_transport(ident.clone()).await?;
 
@@ -244,15 +245,17 @@ async fn listener(node_name: &str) -> RResult<()> {
     let transport = Arc::new(transport);
     let mut in_ev = transport.in_link_events();
 
-    let at = transport.clone();
-    let ad = dest.clone();
-    let announce_data = if node_name.is_empty() { None } else { Some(node_name.to_string()) };
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(3600)).await;
-            at.send_announce(&ad, announce_data.as_deref().map(|s| s.as_bytes())).await;
-        }
-    });
+    if announce_interval > 0 {
+        let at = transport.clone();
+        let ad = dest.clone();
+        let announce_data = if node_name.is_empty() { None } else { Some(node_name.to_string()) };
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(announce_interval)).await;
+                at.send_announce(&ad, announce_data.as_deref().map(|s| s.as_bytes())).await;
+            }
+        });
+    }
 
     loop {
         match in_ev.recv().await {
@@ -297,6 +300,7 @@ fn print_help() {
     eprintln!("Usage: rnpage [options]\n");
     eprintln!("Options:");
     eprintln!("  -n, --name <name>         Node name (shown in NomadNet)");
+    eprintln!("  -b, --announce <sec>      Announce interval in seconds (default: 600, 0 disables)");
     eprintln!("  -i, --identity <path>     Identity file");
     eprintln!("  -p, --print-identity      Print identity and exit");
     eprintln!("  -v, --verbose             Verbose output");
@@ -315,6 +319,7 @@ async fn main() {
     let mut ident_path_arg = None;
     let mut print_ident = false;
     let mut node_name = String::new();
+    let mut announce_interval = DEFAULT_ANNOUNCE;
 
     let mut i = 1;
     while i < args.len() {
@@ -324,6 +329,13 @@ async fn main() {
             "-n" | "--name" => {
                 i += 1;
                 node_name = args.get(i).cloned().unwrap_or_default();
+            }
+            "-b" | "--announce" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse().ok()) {
+                    Some(v) => announce_interval = v,
+                    None => { eprintln!("rnpage: bad announce interval"); std::process::exit(1); }
+                }
             }
             "-i" | "--identity" => {
                 i += 1;
@@ -360,7 +372,7 @@ async fn main() {
         return;
     }
 
-    if let Err(e) = listener(&node_name).await {
+    if let Err(e) = listener(&node_name, announce_interval).await {
         eprintln!("rnpage: {e}");
         std::process::exit(1);
     }

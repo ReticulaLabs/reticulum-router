@@ -34,6 +34,8 @@ const PROTOCOL_VERSION: u8 = 1;
 const MSG_MAGIC: u16 = 0xAC;
 const RNSH_VERSION: &str = "0.2.0";
 
+const DEFAULT_ANNOUNCE: u64 = 600;
+
 const MSG_TYPE_WINDOW_SIZE: u16 = msg_type(2);
 const MSG_TYPE_EXEC_CMD: u16   = msg_type(3);
 const MSG_TYPE_STREAM_DATA: u16 = msg_type(4);
@@ -477,7 +479,7 @@ impl Args {
     fn empty() -> Self {
         Args {
             config: None, ident: None, svc: None, listen: false, scan: false,
-            verbose: 0, quiet: 0, print_ident: false, announce: None,
+            verbose: 0, quiet: 0, print_ident: false, announce: Some(DEFAULT_ANNOUNCE),
             allowed: vec![], no_auth: false, remote_cmd_as_args: false,
             no_remote_cmd: false, no_id: false, mirror: false,
             timeout: None, dest: None, cmd: vec![],
@@ -493,7 +495,7 @@ fn parse_args() -> RResult<Args> {
     };
     let mut a = Args {
         config: None, ident: None, svc: None, listen: false, scan: false,
-        verbose: 0, quiet: 0, print_ident: false, announce: None,
+        verbose: 0, quiet: 0, print_ident: false, announce: Some(DEFAULT_ANNOUNCE),
         allowed: vec![], no_auth: false, remote_cmd_as_args: false,
         no_remote_cmd: false, no_id: false, mirror: false,
         timeout: None, dest: None, cmd,
@@ -549,7 +551,7 @@ fn print_help() {
     eprintln!("Listener:");
     eprintln!("  -l, --listen              Listen mode");
     eprintln!("  -s, --service <name>      Service name");
-    eprintln!("  -b, --announce <sec>      Announce period");
+    eprintln!("  -b, --announce <sec>      Announce interval in seconds (default: 600, 0 disables)");
     eprintln!("  -a, --allowed <hash>      Allowed identity");
     eprintln!("  -n, --no-auth             Disable auth");
     eprintln!("  -C, --no-remote-command   Disable remote cmd");
@@ -837,7 +839,7 @@ async fn listener(a: &Args) -> RResult<()> {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    let period = a.announce.unwrap_or(0);
+    let period = a.announce.unwrap_or(DEFAULT_ANNOUNCE);
     if period > 0 {
         let transport = Arc::new(transport);
         let d2 = dest.clone();

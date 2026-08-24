@@ -27,7 +27,7 @@ pub struct Cfg {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CfgRngit {
-    /// Announce interval in minutes. Set to 0 to disable announces.
+    /// Announce interval in seconds. Set to 0 to disable announces.
     #[serde(default = "default_announce_interval")]
     pub announce_interval: u64,
     /// Free-form node name shown in logs/announces.
@@ -37,7 +37,7 @@ pub struct CfgRngit {
 }
 
 fn default_announce_interval() -> u64 {
-    360
+    600
 }
 
 impl Default for CfgRngit {

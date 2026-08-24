@@ -196,11 +196,35 @@ fn print_usage() {
     eprintln!("  rngit push [--force] <dir> <url>");
     eprintln!("                              Push local refs to a remote repository");
     eprintln!("  rngit delete <url> <ref>    Delete a ref on a remote repository\n");
-    eprintln!("<url> is rns://<destination_hash>/<group>/<repository>");
+    eprintln!("<url> is rns://<destination_hash>/<group>/<repository>\n");
+    eprintln!("Server options:");
+    eprintln!("  -b, --announce <sec>       Announce interval in seconds (default: 600, 0 disables)");
 }
 
 async fn server_main() -> Result<(), Box<dyn std::error::Error>> {
-    let cfg = config::load_cfg(None);
+    let mut cfg = config::load_cfg(None);
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-b" | "--announce" => {
+                i += 1;
+                let v = args
+                    .get(i)
+                    .ok_or("--announce needs a value")
+                    .map_err(|e: &str| e.to_string())?;
+                cfg.rngit.announce_interval = v.parse().map_err(|_| "bad announce interval")?;
+            }
+            "-h" | "--help" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            _ => return Err(format!("unrecognized argument: {}", args[i]).into()),
+        }
+        i += 1;
+    }
+
     let identity = load_identity()?;
     let mut transport = make_transport(&identity).await?;
 
@@ -230,7 +254,7 @@ async fn server_main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             loop {
                 t2.send_announce(&d2, None).await;
-                tokio::time::sleep(Duration::from_secs(announce_interval * 60)).await;
+                tokio::time::sleep(Duration::from_secs(announce_interval)).await;
             }
         });
     }

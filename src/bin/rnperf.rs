@@ -26,6 +26,7 @@ const MSG_TYPE_RESULT: u16 = msg_type(4);
 const MSG_TYPE_ERROR: u16 = msg_type(5);
 
 const DEFAULT_DURATION: f64 = 10.0;
+const DEFAULT_ANNOUNCE: u64 = 600;
 
 type RResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -59,7 +60,7 @@ impl Args {
             verbose: 0,
             dest: None,
             remote_identity: None,
-            announce_interval: None,
+            announce_interval: Some(DEFAULT_ANNOUNCE),
             rate: 5_000_000_000.0,
         }
     }
@@ -116,7 +117,7 @@ fn print_help() {
     eprintln!("Usage: rnperf [options] [destination]\n");
     eprintln!("Listener:");
     eprintln!("  -l, --listen              Listen mode");
-    eprintln!("  -b, --announce <sec>      Re-announce interval (default: no periodic announce)\n");
+    eprintln!("  -b, --announce <sec>      Re-announce interval in seconds (default: 600, 0 disables)\n");
     eprintln!("Initiator:");
     eprintln!("  <destination>             Target destination hash to test\n");
     eprintln!("Options:");
@@ -401,7 +402,7 @@ async fn listener(a: &Args) -> RResult<()> {
     let transport = Arc::new(transport);
 
     // Periodic re-announce
-    if let Some(interval) = a.announce_interval {
+    if let Some(interval) = a.announce_interval.filter(|&i| i > 0) {
         let announce_t = transport.clone();
         let announce_d = dest.clone();
         tokio::spawn(async move {
