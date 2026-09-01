@@ -764,6 +764,14 @@ fn render_prometheus_metrics(
     output.push_str("# TYPE reticulum_transport_announce_table_entries gauge\n");
     output.push_str(&format!("reticulum_transport_announce_table_entries {}\n", metrics.announce_table_entries));
 
+    output.push_str("# HELP reticulum_transport_announce_cache_entries Number of destinations retained in the announce archive cache used to answer onward path requests.\n");
+    output.push_str("# TYPE reticulum_transport_announce_cache_entries gauge\n");
+    output.push_str(&format!("reticulum_transport_announce_cache_entries {}\n", metrics.announce_cache_entries));
+
+    output.push_str("# HELP reticulum_transport_single_out_destinations_entries Number of distinct destinations cached from validated announces (bounded by a 7-day expiry).\n");
+    output.push_str("# TYPE reticulum_transport_single_out_destinations_entries gauge\n");
+    output.push_str(&format!("reticulum_transport_single_out_destinations_entries {}\n", metrics.single_out_destinations_entries));
+
     output.push_str("# HELP reticulum_transport_link_table_entries Number of entries in the link forwarding table.\n");
     output.push_str("# TYPE reticulum_transport_link_table_entries gauge\n");
     output.push_str(&format!("reticulum_transport_link_table_entries {}\n", metrics.link_table_entries));
