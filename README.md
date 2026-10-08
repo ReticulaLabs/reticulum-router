@@ -224,33 +224,38 @@ more real-world data is collected.
 
 > Why do these values differ from Meshtastic / Meshcore?
 > Because Reticulum is a global network. We are not forwarding a few text messages
-> in a small geograpgic area. Reticulum is "worldwide" meaning announcements consume
+> in a small geographic area. Reticulum is "worldwide" meaning announcements consume
 > a large percentage of available air time if we go for "maximum range" settings.
+> tl;dr: Reticulum will generally be shorter range to increase usefulness
+
+We recommend faster bitrates in the city as there are more potential users closer
+together.  Faster bitrate means less on-air time.
 
 ### United States
 
-> All of these settings remain below the 400ms "dwell time".
+> Note: There are no applicable duty cycles or "dwell times" in the US.
 
 Frequency: 914.875 Mhz.  Gives distance to lower-frequency Meshtastic / Meshcore.
 
-| Name            | Bitrate    | Bandwidth      | Spreading Factor  | Coding Rate            | Notes                           |
-|-----------------|------------|----------------|-------------------|------------------------|---------------------------------|
-| Turbo / Short   | 21.8 Kbps  | 500 kHz        | 7                 | 4/5  (5)               | Maximum speed, shortest range. Won't like interference. Older RNode firmwares might have issues|
-| Fast / Medimum  | 10.9 Kbps  | 250 kHz        | 7                 | 4/5  (5)               | Fast, medium range.  Compromise on range for faster speed|
-| Average / Long  | 6.2 Kbps   | 250 kHz        | 8                 | 4/5  (5)               | Good balance of range and speed. Recommended|
-| Slow / Long     | 1.7 Kbps   | 125 kHz        | 9                 | 4/5  (5)               | Slow, maximum range and interference rejection. Announcements will cut into available bitrate|
+| Name            | Bitrate    | Bandwidth  | Spreading Factor  | Coding Rate  | Handheld | Mast    | Rooftop | Usage                | Notes                           |
+|-----------------|------------|------------|-------------------|--------------|----------|---------|---------|----------------------|---------------------------------|
+| Turbo / Short   | 21.9 Kbps  | 500 kHz    | 7                 | 4/5  (5)     | 4.7 mi   | 11.7 mi | 23.3 mi | Fast, close nodes    | Won't like interference. Older RNode firmwares might have issues|
+| Fast / Medium   | 10.9 Kbps  | 250 kHz    | 7                 | 4/5  (5)     | 5.5 mi   | 13.9 mi | 27.7 mi | ✨ Recommended Urban | Compromise on range for faster bitrates|
+| Average / Long  | 6.3 Kbps   | 250 kHz    | 8                 | 4/5  (5)     | 6.6 mi   | 16.5 mi | 33.0 mi | ✨ Recommended Rural | Good balance of range and speed.|
+| Slow / Long     | 1.7 Kbps   | 125 kHz    | 9                 | 4/5  (5)     | 9.3 mi   | 23.3 mi | 46.6 mi | Slow, maximum range  | Good interference rejection. Announcements will cut into available bitrate|
 
 ### Europe
 
-> All of these settings reming below the EU duty cycle of 10%
+> All of these settings remain below the EU duty cycle of 10%
+> Every setting in this table overlaps with Meshtastic and Meshcore (esp default settings) given the small frequency allocation.
 
-Frequency: 869.431 Mhz.
+Frequency: 869.525 Mhz.
 
-| Name            | Bitrate    | Bandwidth      | Spreading Factor  | Coding Rate            | Notes                           |
-|-----------------|------------|----------------|-------------------|------------------------|---------------------------------|
-| Fast / Medium   | 3.3 Kbps   | 125 kHz        | 8                 | 4/5  (5)               | Recommended. 10% Duty Cycle limit|
-| Slow / Long     | 1.1 Kbps   | 62.5 kHz       | 8                 | 4/7  (7)               | Narrower bandwidth for noise rejection. Longer range in urban environments|
-| Slow / Long     | 0.879 Kbps | 62.5 kHz       | 9                 | 4/5  (5)               | Narrower bandwidth for maximum noise rejection / range in urban environments. Announcements will cut into available bitrate|
+| Name            | Bitrate    | Bandwidth  | Spreading Factor | Coding Rate  | Handheld | Mast    | Rooftop | Usage                | Notes                           |
+|-----------------|------------|------------|------------------|--------------|----------|---------|---------|----------------------|---------------------------------|
+| Turbo / Short   | 10.9 Kbps  | 250 kHz    | 7                | 4/5  (5)     | 8.9 km   | 22.3 km | 44.6 km | Fast, close nodes    | Large overlap with Meshtastic / Meshcore| 
+| Average / Long  | 3.1 Kbps   | 125 kHz    | 8                | 4/5  (5)     | 12.6 km  | 31.5 km | 63.1 km | ✨ Recommended       | Good balance of range and noise rejection|
+| Slow / Long     | 1.1 Kbps   | 62.5 kHz   | 8                | 4/7  (7)     | 15.0 km  | 37.5 km | 75.0 km | Slow, maximum range  | Narrower bandwidth for noise rejection. Least Meshtastic / Meshcore overlap|
 
 # Installing
 
