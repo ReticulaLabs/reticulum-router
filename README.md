@@ -237,25 +237,26 @@ together.  Faster bitrate means less on-air time.
 
 Frequency: 914.875 Mhz.  Gives distance to lower-frequency Meshtastic / Meshcore.
 
-| Name            | Bitrate    | Bandwidth  | Spreading Factor  | Coding Rate  | Handheld | Mast    | Rooftop | Usage                | Notes                           |
-|-----------------|------------|------------|-------------------|--------------|----------|---------|---------|----------------------|---------------------------------|
-| Turbo / Short   | 21.9 Kbps  | 500 kHz    | 7                 | 4/5  (5)     | 4.7 mi   | 11.7 mi | 23.3 mi | Fast, close nodes    | Won't like interference. Older RNode firmwares might have issues|
-| Fast / Medium   | 10.9 Kbps  | 250 kHz    | 7                 | 4/5  (5)     | 5.5 mi   | 13.9 mi | 27.7 mi | ✨ Recommended Urban | Compromise on range for faster bitrates|
-| Average / Long  | 6.3 Kbps   | 250 kHz    | 8                 | 4/5  (5)     | 6.6 mi   | 16.5 mi | 33.0 mi | ✨ Recommended Rural | Good balance of range and speed.|
-| Slow / Long     | 1.7 Kbps   | 125 kHz    | 9                 | 4/5  (5)     | 9.3 mi   | 23.3 mi | 46.6 mi | Slow, maximum range  | Good interference rejection. Announcements will cut into available bitrate|
+| Name            | Bitrate    | Bandwidth  | Spread Factor  | Coding Rate  | Handheld | Rooftop | Usage                | Notes                           |
+|-----------------|------------|------------|----------------|--------------|----------|---------|----------------------|---------------------------------|
+| Turbo / Short   | 21.9 Kbps  | 500 kHz    | 7              | 4/5  (5)     | 4.7 mi   | 23.3 mi | Fast, close nodes    | Won't like interference. Older RNode firmwares might have issues|
+| Fast / Medium   | 10.9 Kbps  | 250 kHz    | 7              | 4/5  (5)     | 5.5 mi   | 27.7 mi | ✨ Recommended Urban | Compromise on range for faster bitrates|
+| Average / Long  | 6.3 Kbps   | 250 kHz    | 8              | 4/5  (5)     | 6.6 mi   | 33.0 mi | ✨ Recommended Rural | Good balance of range and speed.|
+| Slow / Long     | 1.7 Kbps   | 125 kHz    | 9              | 4/5  (5)     | 9.3 mi   | 46.6 mi | Slow, maximum range  | Good interference rejection. Announcements will cut into available bitrate|
 
 ### Europe
 
 > All of these settings remain below the EU duty cycle of 10%
+>
 > Every setting in this table overlaps with Meshtastic and Meshcore (esp default settings) given the small frequency allocation.
 
 Frequency: 869.525 Mhz.
 
-| Name            | Bitrate    | Bandwidth  | Spreading Factor | Coding Rate  | Handheld | Mast    | Rooftop | Usage                | Notes                           |
-|-----------------|------------|------------|------------------|--------------|----------|---------|---------|----------------------|---------------------------------|
-| Turbo / Short   | 10.9 Kbps  | 250 kHz    | 7                | 4/5  (5)     | 8.9 km   | 22.3 km | 44.6 km | Fast, close nodes    | Large overlap with Meshtastic / Meshcore| 
-| Average / Long  | 3.1 Kbps   | 125 kHz    | 8                | 4/5  (5)     | 12.6 km  | 31.5 km | 63.1 km | ✨ Recommended       | Good balance of range and noise rejection|
-| Slow / Long     | 1.1 Kbps   | 62.5 kHz   | 8                | 4/7  (7)     | 15.0 km  | 37.5 km | 75.0 km | Slow, maximum range  | Narrower bandwidth for noise rejection. Least Meshtastic / Meshcore overlap|
+| Name            | Bitrate    | Bandwidth  | Spread Factor | Coding Rate  | Handheld | Rooftop | Usage                | Notes                           |
+|-----------------|------------|------------|---------------|--------------|----------|---------|----------------------|---------------------------------|
+| Turbo / Short   | 10.9 Kbps  | 250 kHz    | 7             | 4/5  (5)     | 8.9 km   | 44.6 km | Fast, close nodes    | Full overlap with Meshtastic / Meshcore|
+| Average / Long  | 3.1 Kbps   | 125 kHz    | 8             | 4/5  (5)     | 12.6 km  | 63.1 km | ✨ Recommended       | Good balance of range and noise rejection|
+| Slow / Long     | 1.1 Kbps   | 62.5 kHz   | 8             | 4/7  (7)     | 15.0 km  | 75.0 km | Slow, maximum range  | Best noise rejection. Least Meshtastic / Meshcore overlap|
 
 # Installing
 
