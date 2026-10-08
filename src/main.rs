@@ -182,7 +182,7 @@ impl Daemon {
                         addr
                     );
                     let iface_addr = iface_manager.lock().await.spawn(
-                        TcpServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)),
+                        TcpServer::new(addr, iface_manager.clone()).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)).with_name(iface.name.clone()),
                         TcpServer::spawn,
                     );
                     if iface.discoverable {
@@ -218,7 +218,7 @@ impl Daemon {
                     iface_manager
                         .lock()
                         .await
-                        .spawn(TcpClient::new(addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)), TcpClient::spawn);
+                        .spawn(TcpClient::new(addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)).with_name(iface.name.clone()), TcpClient::spawn);
                 }
                 InterfaceConfig::BackboneInterface {
                     bind_host,
@@ -247,7 +247,8 @@ impl Daemon {
                             );
                             let mut server = BackboneServer::new(addr, iface_manager.clone())
                                 .with_interface_mode(iface_mode)
-                                .with_gravity(iface.gravity.unwrap_or(0));
+                                .with_gravity(iface.gravity.unwrap_or(0))
+                                .with_name(iface.name.clone());
                             if let Some(bitrate) = bitrate {
                                 log::info!(
                                     "Interface '{}': backbone pacing bitrate set to {} bps",
@@ -291,7 +292,7 @@ impl Daemon {
                                 iface.name,
                                 addr
                             );
-                            let mut client = BackboneClient::new(addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0));
+                            let mut client = BackboneClient::new(addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)).with_name(iface.name.clone());
                             if let Some(bitrate) = bitrate {
                                 log::info!(
                                     "Interface '{}': backbone pacing bitrate set to {} bps",
@@ -324,7 +325,7 @@ impl Daemon {
                         forward_addr
                     );
                     iface_manager.lock().await.spawn(
-                        UdpInterface::new(bind_addr, Some(forward_addr)).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)),
+                        UdpInterface::new(bind_addr, Some(forward_addr)).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)).with_name(iface.name.clone()),
                         UdpInterface::spawn,
                     );
                 }
@@ -358,7 +359,7 @@ impl Daemon {
                     let iface_addr = iface_manager
                         .lock()
                         .await
-                        .spawn(RNodeInterface::new(rnode_config).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)), RNodeInterface::spawn);
+                        .spawn(RNodeInterface::new(rnode_config).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)).with_name(iface.name.clone()), RNodeInterface::spawn);
                     if iface.discoverable {
                         let mut discovery_config = DiscoveryInterfaceConfig::rnode(
                             &iface.name,
@@ -391,7 +392,7 @@ impl Daemon {
                         control_addr
                     );
                     iface_manager.lock().await.spawn(
-                        Modem73Interface::new(target_addr, control_addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)),
+                        Modem73Interface::new(target_addr, control_addr).with_interface_mode(iface_mode).with_gravity(iface.gravity.unwrap_or(0)).with_name(iface.name.clone()),
                         Modem73Interface::spawn,
                     );
                 }
@@ -451,19 +452,19 @@ impl Daemon {
 
                     let iface_addr = match chipset.as_str() {
                         "SX1276" => iface_manager.lock().await.spawn(
-                            LoRaInterface::<SX1276>::new(lora_config),
+                            LoRaInterface::<SX1276>::new(lora_config).with_name(iface.name.clone()),
                             LoRaInterface::<SX1276>::spawn,
                         ),
                         "SX1261" => iface_manager.lock().await.spawn(
-                            LoRaInterface::<SX1262>::new(lora_config.with_sx1261_mode(true)),
+                            LoRaInterface::<SX1262>::new(lora_config.with_sx1261_mode(true)).with_name(iface.name.clone()),
                             LoRaInterface::<SX1262>::spawn,
                         ),
                         "SX1262" => iface_manager.lock().await.spawn(
-                            LoRaInterface::<SX1262>::new(lora_config),
+                            LoRaInterface::<SX1262>::new(lora_config).with_name(iface.name.clone()),
                             LoRaInterface::<SX1262>::spawn,
                         ),
                         "LR1121" => iface_manager.lock().await.spawn(
-                            LoRaInterface::<LR1121>::new(lora_config),
+                            LoRaInterface::<LR1121>::new(lora_config).with_name(iface.name.clone()),
                             LoRaInterface::<LR1121>::spawn,
                         ),
                         _ => {
