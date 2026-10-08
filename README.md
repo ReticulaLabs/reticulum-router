@@ -99,6 +99,7 @@ The Reticulum Router Daemon will automatically convert any existing non-standard
   * The old shared_instance language should still work as expected though
   * Added rpc_bind_host. It is not recommended to share the RPC onto a public
     network, however listening outside of the host may be helpful in some debugging situations.
+* Implementation is "RSDK-RS" vs "RNS"
 
 ## Example syntax
 
@@ -272,8 +273,8 @@ $ cargo build --release
 > Linux, Alpine based x86_64 and aarch64 containers are available
 
 ```
-docker pull ghcr.io/reticulalabs/reticulum-router:v1.11.3
-docker run -v reticulum_data:/root/.config/reticulum ghcr.io/reticulalabs/reticulum-router:v1.11.3
+docker pull ghcr.io/reticulalabs/reticulum-router:v1.11.4
+docker run -v reticulum_data:/root/.config/reticulum ghcr.io/reticulalabs/reticulum-router:v1.11.4
 ```
 
 /root/.config/reticulum will contain the following files:
