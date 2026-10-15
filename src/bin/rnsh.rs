@@ -376,7 +376,13 @@ fn compress(buf: &[u8], max: usize) -> (bool, usize, Vec<u8>) {
 }
 
 fn decompress(data: &[u8], max: usize) -> RResult<Vec<u8>> {
-    let mut dec = BzDecoder::new(data);
+    // Bound the output while decoding rather than after: `take` stops the
+    // decoder once the limit is reached, so a small but highly compressible
+    // payload cannot expand into an unbounded allocation. The `max + 1`
+    // window lets an exactly-at-limit payload still decode cleanly while
+    // anything larger is rejected.
+    let limit = max.saturating_add(1);
+    let mut dec = BzDecoder::new(data).take(limit as u64);
     let mut out = Vec::with_capacity(max.min(data.len()));
     dec.read_to_end(&mut out)?;
     if out.len() > max { bail!("decompressed data exceeds max"); }
@@ -1365,6 +1371,46 @@ mod tests {
         // --no-auth disables the check even with an allow list present.
         a.no_auth = true;
         assert!(!auth_required(&a, &some));
+    }
+
+    /// Compress `data` the same way the peer would.
+    fn bz(data: &[u8]) -> Vec<u8> {
+        let mut e = BzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(data).expect("compress");
+        e.finish().expect("finish")
+    }
+
+    #[test]
+    fn decompress_round_trips() {
+        let data: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+        assert_eq!(decompress(&bz(&data), MAX_CHUNK).unwrap(), data);
+    }
+
+    #[test]
+    fn decompress_allows_exactly_the_limit() {
+        // A payload landing precisely on `max` must not be rejected.
+        for n in [0usize, 1, 100, 4096] {
+            let enc = bz(&vec![b'z'; n]);
+            assert_eq!(decompress(&enc, n).unwrap().len(), n, "failed at n={n}");
+        }
+    }
+
+    #[test]
+    fn decompress_rejects_oversized_expansion() {
+        // Tiny input, huge expansion: the classic decompression bomb.
+        let bomb = bz(&vec![b'a'; 8 * 1024 * 1024]);
+        assert!(bomb.len() < 8192, "bomb should compress small, got {}", bomb.len());
+        for max in [1usize, 1024, 4096, MAX_CHUNK] {
+            assert!(
+                decompress(&bomb, max).is_err(),
+                "accepted a bomb with max={max}"
+            );
+        }
+    }
+
+    #[test]
+    fn decompress_rejects_corrupt_input() {
+        assert!(decompress(b"not a bzip2 stream", 1024).is_err());
     }
 
     #[test]
