@@ -240,7 +240,12 @@ fn pack_ver(sw: &str, pv: u8) -> Vec<u8> {
 
 fn unpack_ver(raw: &[u8]) -> RResult<(String, u8)> {
     let a = read_value(&mut io::Cursor::new(raw))?.as_array().ok_or("ver not array")?.clone();
-    Ok((a[0].as_str().unwrap_or("").to_string(), a[1].as_u64().unwrap_or(0) as u8))
+    // A peer controls this payload: never index it, a short array (or an
+    // empty one) must not panic. A missing version decodes as 0 and is
+    // rejected by the caller's protocol check.
+    let sw = a.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let pv = a.get(1).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    Ok((sw, pv))
 }
 
 fn pack_exec(cmd: &[String], pin: bool, pou: bool, per: bool, term: &Option<String>, r: u16, c: u16, h: u16, v: u16) -> Vec<u8> {
@@ -296,7 +301,8 @@ fn pack_err(msg: &str, fatal: bool) -> Vec<u8> {
 fn unpack_err_msg(raw: &[u8]) -> (String, bool) {
     if let Ok(v) = read_value(&mut io::Cursor::new(raw)) {
         if let Some(a) = v.as_array() {
-            return (a[0].as_str().unwrap_or("?").to_string(),
+            // Peer-controlled payload: a short array must not panic.
+            return (a.first().and_then(|v| v.as_str()).unwrap_or("?").to_string(),
                     a.get(1).and_then(|v| v.as_bool()).unwrap_or(false));
         }
     }
@@ -314,6 +320,33 @@ fn stream_unhdr(raw: &[u8]) -> RResult<(u16, bool, bool)> {
     if raw.len() < 2 { bail!("stream header too short"); }
     let h = u16::from_be_bytes([raw[0], raw[1]]);
     Ok(((h & HDR_ID_MASK), (h & HDR_EOF) != 0, (h & HDR_COMPRESSED) != 0))
+}
+
+/// Build the wire frames for one block of stream data.
+///
+/// `data` is routinely larger than the link MDU (the PTY reader alone reads up
+/// to 64 KiB at a time), so it is split across as many frames as needed
+/// instead of being truncated. `compress` may only consume part of its input
+/// when it trades size for a smaller encoding, so the loop advances by the
+/// byte count `compress` reports rather than by a fixed chunk size.
+///
+/// Every frame is a 2-byte header plus a payload of at most `max_data` bytes,
+/// which keeps it within the MDU that `max_data` was derived from.
+fn stream_frames(sid: u16, eof: bool, data: &[u8], max_data: usize) -> Vec<Vec<u8>> {
+    let mut frames = Vec::new();
+    let mut rest = data;
+    while !rest.is_empty() {
+        let (comp, used, payload) = compress(rest, max_data);
+        let mut p = stream_hdr(sid, eof, comp);
+        p.extend_from_slice(&payload);
+        frames.push(p);
+        if used == 0 {
+            // Defensive: a zero-length MDU would otherwise spin forever.
+            break;
+        }
+        rest = &rest[used..];
+    }
+    frames
 }
 
 /// Helper: create and send a channel message on a link.
@@ -762,12 +795,16 @@ async fn initiator(a: &Args) -> RResult<i32> {
                 }
             }
             if !out_data.is_empty() {
-                let (_, _, chunk) = compress(&out_data, max_data);
-                let mut p = stream_hdr(SID_STDIN, false, false);
-                p.extend_from_slice(&chunk);
-                if send_channel(&link_arc2, &transport2, MSG_TYPE_STREAM_DATA, &p).await.is_err() {
-                    break;
+                // Frames carry their own compressed flag, and one read may
+                // need several frames; send them all or fail.
+                let mut sent_ok = true;
+                for p in stream_frames(SID_STDIN, false, &out_data, max_data) {
+                    if send_channel(&link_arc2, &transport2, MSG_TYPE_STREAM_DATA, &p).await.is_err() {
+                        sent_ok = false;
+                        break;
+                    }
                 }
+                if !sent_ok { break; }
             }
         }
         let p = stream_hdr(SID_STDIN, true, false);
@@ -1042,13 +1079,14 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
             let (pty_tx, pty_rx) = std::sync::mpsc::channel::<Vec<u8>>();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 65536];
-                loop {
+                'read: loop {
                     let n = unsafe { libc::read(thread_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
                     if n > 0 {
-                        let (comp, _, chunk) = compress(&buf[..n as usize], max_data);
-                        let mut p = stream_hdr(SID_STDOUT, false, comp);
-                        p.extend_from_slice(&chunk);
-                        if pty_tx.send(p).is_err() { break; }
+                        // A single read can far exceed the MDU; emit as many
+                        // frames as it takes instead of dropping the tail.
+                        for p in stream_frames(SID_STDOUT, false, &buf[..n as usize], max_data) {
+                            if pty_tx.send(p).is_err() { break 'read; }
+                        }
                     } else if n == 0 {
                         break;
                     } else {
@@ -1247,5 +1285,95 @@ async fn main() {
     } else {
         print_help();
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reassemble frames exactly as the receiving side does: strip the
+    /// 2-byte header and decompress when the frame says it is compressed.
+    fn reassemble(frames: &[Vec<u8>]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for f in frames {
+            let (sid, _eof, comp) = stream_unhdr(f).expect("header");
+            assert_eq!(sid, SID_STDOUT, "wrong stream id");
+            let body = &f[2..];
+            if comp {
+                out.extend_from_slice(&decompress(body, MAX_CHUNK).expect("decompress"));
+            } else {
+                out.extend_from_slice(body);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn stream_frames_round_trips_without_truncation() {
+        let max = 400;
+        // Sizes either side of the compression/segmentation thresholds.
+        for size in [0usize, 1, 31, 32, 63, 128, 399, 400, 401, 423, 800, 4096, 65536] {
+            let data: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            let frames = stream_frames(SID_STDOUT, false, &data, max);
+            assert_eq!(reassemble(&frames), data, "lost or altered data at size {size}");
+        }
+    }
+
+    #[test]
+    fn stream_frames_round_trips_incompressible_data() {
+        let max = 400;
+        // LCG bytes bzip2 cannot shrink, forcing the multi-frame plain path.
+        let mut data = Vec::new();
+        let mut x: u32 = 0x1234_5678;
+        for _ in 0..20_000 {
+            x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+            data.push((x >> 16) as u8);
+        }
+        let frames = stream_frames(SID_STDOUT, false, &data, max);
+        assert!(frames.len() > 1, "expected several frames, got {}", frames.len());
+        assert_eq!(reassemble(&frames), data);
+    }
+
+    #[test]
+    fn stream_frames_fit_within_the_mdu() {
+        let max = 400;
+        for data in [vec![b'x'; 5000], vec![b'a'; 5000], (0..999u32).map(|i| i as u8).collect()] {
+            for f in stream_frames(SID_STDOUT, false, &data, max) {
+                assert!(f.len() <= max + 2, "frame of {} bytes exceeds the mdu", f.len());
+            }
+        }
+    }
+
+    #[test]
+    fn stream_frames_flag_compressed_payloads() {
+        let max = 400;
+        let data = vec![b'a'; 400];
+        let frames = stream_frames(SID_STDOUT, false, &data, max);
+        assert_eq!(frames.len(), 1);
+        let (_sid, _eof, comp) = stream_unhdr(&frames[0]).unwrap();
+        assert!(comp, "a compressible payload must set HDR_COMPRESSED");
+        // The body is the encoded form, not the plaintext.
+        assert_ne!(&frames[0][2..], &data[..], "body was sent uncompressed");
+    }
+
+    #[test]
+    fn unpack_ver_survives_short_arrays() {
+        // Empty fixarray and a single-element array must not panic.
+        assert_eq!(unpack_ver(&[0x90]).unwrap(), (String::new(), 0));
+        assert_eq!(unpack_ver(&[0x91, 0xa1, b'x']).unwrap(), ("x".into(), 0));
+        // A well-formed packet still decodes.
+        let good = [0x92, 0xa5, b'h', b'e', b'l', b'l', b'o', 0x01];
+        assert_eq!(unpack_ver(&good).unwrap(), ("hello".into(), 1));
+    }
+
+    #[test]
+    fn unpack_err_msg_survives_short_arrays() {
+        let (m, fatal) = unpack_err_msg(&[0x90]);
+        assert_eq!(m, "?");
+        assert!(!fatal);
+        let (m, fatal) = unpack_err_msg(&[0x91, 0xa7, b'n', b'o', b't', b' ', b'o', b'k', b'!']);
+        assert_eq!(m, "not ok!");
+        assert!(!fatal);
     }
 }
