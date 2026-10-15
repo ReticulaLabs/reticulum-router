@@ -321,6 +321,18 @@ pub fn delete_ref(repo_path: &Path, ref_name: &str) -> GResult<()> {
     Ok(())
 }
 
+/// Path of the ACL (`.allowed`) file belonging to a repository or group directory.
+///
+/// The suffix is always *appended*. `Path::with_extension` would instead
+/// replace any existing extension, so `foo.git` would map to `foo.allowed` —
+/// which is the ACL file of a *different* repository named `foo`. Always
+/// build this path through this function so the writer and the reader agree.
+pub fn acl_path(dir: &Path) -> PathBuf {
+    let mut name = dir.as_os_str().to_os_string();
+    name.push(".allowed");
+    PathBuf::from(name)
+}
+
 /// Initialize a new bare repository and grant the creator admin access.
 pub fn create_repository(group_path: &Path, repo_name: &str, creator_hash: &str) -> GResult<()> {
     let repo_path = group_path.join(repo_name);
@@ -339,9 +351,9 @@ pub fn create_repository(group_path: &Path, repo_name: &str, creator_hash: &str)
         }
     }
 
-    let allowed_path = repo_path.with_extension("allowed");
+    let acl_file = acl_path(&repo_path);
     let allowed_content = format!("adm:{creator_hash}\n");
-    if std::fs::write(&allowed_path, allowed_content).is_err() {
+    if std::fs::write(&acl_file, allowed_content).is_err() {
         let _ = std::fs::remove_dir_all(&repo_path);
         return Err("could not set repository permissions".into());
     }
@@ -616,6 +628,51 @@ mod tests {
         assert!(parse_request_repository_path("public").is_none());
         assert!(parse_request_repository_path("public/a/b").is_none());
         assert!(parse_request_repository_path("").is_none());
+    }
+
+    #[test]
+    fn acl_path_appends_and_never_replaces() {
+        // The ACL file must be derived by appending ".allowed".
+        assert_eq!(
+            acl_path(Path::new("/srv/repos/public/plain")),
+            PathBuf::from("/srv/repos/public/plain.allowed")
+        );
+        // A dotted repo must not collide with the ACL file of another repo:
+        // `with_extension` would yield "foo.allowed", which belongs to "foo".
+        assert_eq!(
+            acl_path(Path::new("/srv/repos/public/foo.git")),
+            PathBuf::from("/srv/repos/public/foo.git.allowed")
+        );
+        assert_ne!(
+            acl_path(Path::new("/srv/repos/public/foo.git")),
+            acl_path(Path::new("/srv/repos/public/foo"))
+        );
+        // Multiple dots must be preserved verbatim.
+        assert_eq!(
+            acl_path(Path::new("/srv/repos/public/a.b.c")),
+            PathBuf::from("/srv/repos/public/a.b.c.allowed")
+        );
+    }
+
+    #[test]
+    fn create_repository_writes_acl_where_reader_looks() {
+        let tmp = TempDir::new("rngit-test-create").unwrap();
+        let group = tmp.path().join("public");
+        std::fs::create_dir_all(&group).unwrap();
+
+        // A dotted name is the case that used to write the ACL of a
+        // different repository entirely.
+        create_repository(&group, "victim.git", "ab").unwrap();
+
+        // Written exactly where repo_access()/group_access() read it.
+        assert!(acl_path(&group.join("victim.git")).is_file());
+        assert_eq!(
+            std::fs::read_to_string(acl_path(&group.join("victim.git"))).unwrap(),
+            "adm:ab\n"
+        );
+
+        // And it did NOT clobber the sibling repo's ACL file.
+        assert!(!acl_path(&group.join("victim")).exists());
     }
 
     #[test]

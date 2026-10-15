@@ -466,7 +466,7 @@ impl Rngit {
     }
 
     fn group_access(&self, group: &str, group_path: &Path) -> AccessLists {
-        let allowed = PathBuf::from(format!("{}.allowed", group_path.display()));
+        let allowed = gitutil::acl_path(group_path);
         let mut input = String::new();
         if let Ok(content) = std::fs::read_to_string(&allowed) {
             input.push_str(&content);
@@ -482,7 +482,7 @@ impl Rngit {
     }
 
     fn repo_access(&self, repo_path: &Path) -> AccessLists {
-        let allowed = PathBuf::from(format!("{}.allowed", repo_path.display()));
+        let allowed = gitutil::acl_path(repo_path);
         let mut lists = AccessLists::default();
         if let Ok(content) = std::fs::read_to_string(&allowed) {
             lists = permissions_from_allowed_input(&content, &self.cfg.aliases);
