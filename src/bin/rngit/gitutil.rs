@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 pub type GResult<T> = Result<T, String>;
@@ -63,6 +63,34 @@ pub fn san_sha(sha: &str) -> Option<&str> {
     Some(sha)
 }
 
+/// True if `name` is a single, plain path component.
+///
+/// `Component::Normal` excludes `.`, `..`, the root and any prefix, and
+/// requiring exactly one component additionally rejects embedded separators
+/// such as `a/b` that would otherwise reach a subdirectory.
+fn is_plain_component(name: &str) -> bool {
+    let mut comps = Path::new(name).components();
+    matches!(comps.next(), Some(Component::Normal(_))) && comps.next().is_none()
+}
+
+/// Resolve a repository name against its group directory, returning `None`
+/// if the result would not stay inside `group_path`.
+///
+/// `parse_request_repository_path` already rejects `.`/`..`, but this is the
+/// single place every `group_path.join(repo)` goes through, so containment is
+/// enforced here rather than at each call site.
+pub fn repo_dir(group_path: &Path, repo: &str) -> Option<PathBuf> {
+    if !is_plain_component(repo) {
+        return None;
+    }
+    let joined = group_path.join(repo);
+    // Belt and braces: lexical component-wise containment check.
+    if joined == group_path || !joined.starts_with(group_path) {
+        return None;
+    }
+    Some(joined)
+}
+
 /// Parse a "group/repo" request repository path.
 pub fn parse_request_repository_path(path: &str) -> Option<(&str, &str)> {
     let mut comps = path.splitn(3, '/');
@@ -71,7 +99,7 @@ pub fn parse_request_repository_path(path: &str) -> Option<(&str, &str)> {
     if comps.next().is_some() {
         return None;
     }
-    if group.is_empty() || repo.is_empty() {
+    if !is_plain_component(group) || !is_plain_component(repo) {
         return None;
     }
     if group.len() > 256 || repo.len() > 256 {
@@ -335,7 +363,8 @@ pub fn acl_path(dir: &Path) -> PathBuf {
 
 /// Initialize a new bare repository and grant the creator admin access.
 pub fn create_repository(group_path: &Path, repo_name: &str, creator_hash: &str) -> GResult<()> {
-    let repo_path = group_path.join(repo_name);
+    let repo_path =
+        repo_dir(group_path, repo_name).ok_or("invalid repository name")?;
     if repo_path.exists() {
         return Err("repository already exists".into());
     }
@@ -628,6 +657,58 @@ mod tests {
         assert!(parse_request_repository_path("public").is_none());
         assert!(parse_request_repository_path("public/a/b").is_none());
         assert!(parse_request_repository_path("").is_none());
+    }
+
+    #[test]
+    fn repo_path_parsing_rejects_traversal() {
+        // Escaping the group directory.
+        assert!(parse_request_repository_path("public/..").is_none());
+        assert!(parse_request_repository_path("public/.").is_none());
+        assert!(parse_request_repository_path("../myrepo").is_none());
+        assert!(parse_request_repository_path("public/../myrepo").is_none());
+        assert!(parse_request_repository_path("..").is_none());
+        // Still only two components, but the second one walks out.
+        assert!(parse_request_repository_path("public/foo..bar").is_some());
+        assert!(parse_request_repository_path("public/...").is_some());
+    }
+
+    #[test]
+    fn repo_dir_stays_inside_group() {
+        let base = Path::new("/srv/repos");
+        let group = base.join("public");
+
+        assert_eq!(repo_dir(&group, "myrepo"), Some(group.join("myrepo")));
+        // Dots inside a name are fine and do not traverse.
+        assert_eq!(
+            repo_dir(&group, "foo.git"),
+            Some(PathBuf::from("/srv/repos/public/foo.git"))
+        );
+        assert_eq!(
+            repo_dir(&group, "foo..bar"),
+            Some(PathBuf::from("/srv/repos/public/foo..bar"))
+        );
+
+        // Anything that escapes the group is refused.
+        for bad in ["..", ".", "../evil", "a/b", "", "/etc"] {
+            assert_eq!(repo_dir(&group, bad), None, "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn create_repository_refuses_traversal() {
+        let tmp = TempDir::new("rngit-test-traversal").unwrap();
+        let group = tmp.path().join("public");
+        std::fs::create_dir_all(&group).unwrap();
+        std::fs::create_dir_all(tmp.path().join("outside")).unwrap();
+
+        // Must not create anything in the parent of the group directory.
+        assert!(create_repository(&group, "..", "ab").is_err());
+        assert!(create_repository(&group, ".", "ab").is_err());
+        assert!(!tmp.path().join("outside.allowed").exists());
+        assert!(!tmp.path().join("public.allowed").exists());
+
+        // The group directory itself must still be intact and empty of repos.
+        assert!(std::fs::read_dir(&group).unwrap().next().is_none());
     }
 
     #[test]

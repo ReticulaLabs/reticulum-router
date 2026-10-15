@@ -456,7 +456,7 @@ impl Rngit {
         if !group_path.is_dir() {
             return None;
         }
-        let repo_path = group_path.join(repo);
+        let repo_path = gitutil::repo_dir(&group_path, repo)?;
         if !repo_path.is_dir() {
             return None;
         }
@@ -946,7 +946,9 @@ impl Rngit {
             };
         }
 
-        let repository_path = group_path.join(repo);
+        let Some(repository_path) = gitutil::repo_dir(&group_path, repo) else {
+            return Self::invalid_request();
+        };
         if repository_path.exists() {
             let existing_read = self.resolve_perm(peer, group, repo, Perm::Read);
             return if existing_read {
