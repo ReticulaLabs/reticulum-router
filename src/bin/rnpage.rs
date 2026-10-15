@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 const APP_NAME: &str = "nomadnetwork";
 const APP_ASPECT: &str = "node";
 const TOOL_NAME: &str = "rnpage";
-const DEFAULT_ANNOUNCE: u64 = 600;
+const DEFAULT_ANNOUNCE: u64 = 3600;
 
 type RResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -300,7 +300,7 @@ fn print_help() {
     eprintln!("Usage: rnpage [options]\n");
     eprintln!("Options:");
     eprintln!("  -n, --name <name>         Node name (shown in NomadNet)");
-    eprintln!("  -b, --announce <sec>      Announce interval in seconds (default: 600, 0 disables)");
+    eprintln!("  -b, --announce <sec>      Announce interval in seconds (default: {DEFAULT_ANNOUNCE}, 0 disables)");
     eprintln!("  -i, --identity <path>     Identity file");
     eprintln!("  -p, --print-identity      Print identity and exit");
     eprintln!("  -v, --verbose             Verbose output");
@@ -333,7 +333,13 @@ async fn main() {
             "-b" | "--announce" => {
                 i += 1;
                 match args.get(i).and_then(|s| s.parse().ok()) {
-                    Some(v) => announce_interval = v,
+                    Some(v) => {
+                        if v < 900 {
+                            eprintln!("rnpage: announce interval must be greater than 900 seconds");
+                            std::process::exit(1);
+                        }
+                        announce_interval = v;
+                    },
                     None => { eprintln!("rnpage: bad announce interval"); std::process::exit(1); }
                 }
             }

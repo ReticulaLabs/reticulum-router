@@ -26,7 +26,7 @@ const MSG_TYPE_RESULT: u16 = msg_type(4);
 const MSG_TYPE_ERROR: u16 = msg_type(5);
 
 const DEFAULT_DURATION: f64 = 10.0;
-const DEFAULT_ANNOUNCE: u64 = 600;
+const DEFAULT_ANNOUNCE: u64 = 1800;
 
 type RResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -89,6 +89,7 @@ fn parse_args() -> RResult<Args> {
             "-b" | "--announce" => {
                 let v = next_val(&mut it, &arg)?;
                 a.announce_interval = Some(v.parse::<u64>().map_err(|_| "bad announce interval")?);
+                if a.announce_interval.unwrap() < 600 { bail!("announcement rate must be 600 seconds or greater"); }
             }
             "-R" | "--remote-identity" => {
                 a.remote_identity = Some(next_val(&mut it, &arg)?);
@@ -117,7 +118,7 @@ fn print_help() {
     eprintln!("Usage: rnperf [options] [destination]\n");
     eprintln!("Listener:");
     eprintln!("  -l, --listen              Listen mode");
-    eprintln!("  -b, --announce <sec>      Re-announce interval in seconds (default: 600, 0 disables)\n");
+    eprintln!("  -b, --announce <sec>      Re-announce interval in seconds (default: {DEFAULT_ANNOUNCE}, 0 disables)\n");
     eprintln!("Initiator:");
     eprintln!("  <destination>             Target destination hash to test\n");
     eprintln!("Options:");

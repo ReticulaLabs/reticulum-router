@@ -36,7 +36,7 @@ mod server;
 mod e2e;
 
 use client::{Client, ClientResponse};
-use config::{APP_ASPECT, APP_NAME};
+use config::{APP_ASPECT, APP_NAME, DEFAULT_ANNOUNCE};
 use server::Rngit;
 use transfer::{PATH_DELETE, PATH_FETCH, PATH_LIST, PATH_PUSH};
 
@@ -198,7 +198,7 @@ fn print_usage() {
     eprintln!("  rngit delete <url> <ref>    Delete a ref on a remote repository\n");
     eprintln!("<url> is rns://<destination_hash>/<group>/<repository>\n");
     eprintln!("Server options:");
-    eprintln!("  -b, --announce <sec>       Announce interval in seconds (default: 600, 0 disables)");
+    eprintln!("  -b, --announce <sec>       Announce interval in seconds (default: {DEFAULT_ANNOUNCE}, 0 disables)");
 }
 
 async fn server_main() -> Result<(), Box<dyn std::error::Error>> {
@@ -215,6 +215,9 @@ async fn server_main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or("--announce needs a value")
                     .map_err(|e: &str| e.to_string())?;
                 cfg.rngit.announce_interval = v.parse().map_err(|_| "bad announce interval")?;
+                if cfg.rngit.announce_interval < 900 {
+                    return Err(format!("announce interval must be 900 seconds or greater").into());
+                }
             }
             "-h" | "--help" => {
                 print_usage();

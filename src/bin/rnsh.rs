@@ -34,7 +34,7 @@ const PROTOCOL_VERSION: u8 = 1;
 const MSG_MAGIC: u16 = 0xAC;
 const RNSH_VERSION: &str = "0.2.0";
 
-const DEFAULT_ANNOUNCE: u64 = 600;
+const DEFAULT_ANNOUNCE: u64 = 1800;
 
 const MSG_TYPE_WINDOW_SIZE: u16 = msg_type(2);
 const MSG_TYPE_EXEC_CMD: u16   = msg_type(3);
@@ -519,6 +519,7 @@ fn parse_args() -> RResult<Args> {
             "-b" | "--announce" => {
                 let p = next_val(&mut it, &arg)?;
                 a.announce = Some(p.parse().map_err(|_| "bad announce period")?);
+                if a.announce.unwrap() < 900 { bail!("announce interval must be 900 seconds or greater"); }
             }
             "-a" | "--allowed" => { a.allowed.push(next_val(&mut it, &arg)?); }
             "-n" | "--no-auth" => { a.no_auth = true; }
@@ -551,7 +552,7 @@ fn print_help() {
     eprintln!("Listener:");
     eprintln!("  -l, --listen              Listen mode");
     eprintln!("  -s, --service <name>      Service name");
-    eprintln!("  -b, --announce <sec>      Announce interval in seconds (default: 600, 0 disables)");
+    eprintln!("  -b, --announce <sec>      Announce interval in seconds (default: {DEFAULT_ANNOUNCE} 0 disables)");
     eprintln!("  -a, --allowed <hash>      Allowed identity");
     eprintln!("  -n, --no-auth             Disable auth");
     eprintln!("  -C, --no-remote-command   Disable remote cmd");

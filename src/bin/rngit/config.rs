@@ -7,6 +7,9 @@ use serde::Deserialize;
 pub const APP_NAME: &str = "git";
 pub const APP_ASPECT: &str = "repositories";
 
+/// Announce interval in seconds used when not set in config or on the CLI.
+pub const DEFAULT_ANNOUNCE: u64 = 3600;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Cfg {
     #[serde(default)]
@@ -37,7 +40,7 @@ pub struct CfgRngit {
 }
 
 fn default_announce_interval() -> u64 {
-    600
+    DEFAULT_ANNOUNCE
 }
 
 impl Default for CfgRngit {
