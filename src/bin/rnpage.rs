@@ -129,14 +129,16 @@ async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
                 CfgIfaceType::TCPServerInterface { bind_host, bind_port } => {
                     let a = format!("{bind_host}:{bind_port}");
                     let _ = mgr.lock().await.spawn(
-                        reticulum_sdk::iface::tcp_server::TcpServer::new(a, mgr.clone()),
+                        reticulum_sdk::iface::tcp_server::TcpServer::new(a, mgr.clone())
+                            .with_name(iface.name.clone()),
                         reticulum_sdk::iface::tcp_server::TcpServer::spawn,
                     );
                 }
                 CfgIfaceType::TCPClientInterface { target_host, target_port } => {
                     let a = format!("{target_host}:{target_port}");
                     let _ = mgr.lock().await.spawn(
-                        reticulum_sdk::iface::tcp_client::TcpClient::new(a),
+                        reticulum_sdk::iface::tcp_client::TcpClient::new(a)
+                            .with_name(iface.name.clone()),
                         reticulum_sdk::iface::tcp_client::TcpClient::spawn,
                     );
                 }
@@ -144,7 +146,8 @@ async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
                     let b = format!("{listen_ip}:{listen_port}");
                     let f = format!("{forward_ip}:{forward_port}");
                     let _ = mgr.lock().await.spawn(
-                        reticulum_sdk::iface::udp::UdpInterface::new(b, Some(f)),
+                        reticulum_sdk::iface::udp::UdpInterface::new(b, Some(f))
+                            .with_name(iface.name.clone()),
                         reticulum_sdk::iface::udp::UdpInterface::spawn,
                     );
                 }

@@ -4,7 +4,7 @@ use std::ffi::CString;
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -190,31 +190,38 @@ async fn make_transport(id: PrivateIdentity) -> RResult<Transport> {
             match &iface.config {
                 CfgIfaceType::TCPServerInterface { bind_host, bind_port } => {
                     let a = format!("{bind_host}:{bind_port}");
-                    log::info!("rnsh: TCP server on {a}");
+                    log::info!("rnsh: interface '{}' TCP server on {a}", iface.name);
                     let _ = mgr.lock().await.spawn(
-                        reticulum_sdk::iface::tcp_server::TcpServer::new(a, mgr.clone()),
+                        reticulum_sdk::iface::tcp_server::TcpServer::new(a, mgr.clone())
+                            .with_name(iface.name.clone()),
                         reticulum_sdk::iface::tcp_server::TcpServer::spawn,
                     );
                 }
                 CfgIfaceType::TCPClientInterface { target_host, target_port } => {
                     let a = format!("{target_host}:{target_port}");
-                    log::info!("rnsh: TCP client to {a}");
+                    log::info!("rnsh: interface '{}' TCP client to {a}", iface.name);
                     let _ = mgr.lock().await.spawn(
-                        reticulum_sdk::iface::tcp_client::TcpClient::new(a),
+                        reticulum_sdk::iface::tcp_client::TcpClient::new(a)
+                            .with_name(iface.name.clone()),
                         reticulum_sdk::iface::tcp_client::TcpClient::spawn,
                     );
                 }
                 CfgIfaceType::UDPInterface { listen_ip, listen_port, forward_ip, forward_port } => {
                     let b = format!("{listen_ip}:{listen_port}");
                     let f = format!("{forward_ip}:{forward_port}");
-                    log::info!("rnsh: UDP {b} -> {f}");
+                    log::info!("rnsh: interface '{}' UDP {b} -> {f}", iface.name);
                     let _ = mgr.lock().await.spawn(
-                        reticulum_sdk::iface::udp::UdpInterface::new(b, Some(f)),
+                        reticulum_sdk::iface::udp::UdpInterface::new(b, Some(f))
+                            .with_name(iface.name.clone()),
                         reticulum_sdk::iface::udp::UdpInterface::spawn,
                     );
                 }
-                CfgIfaceType::AutoInterface {} => log::warn!("rnsh: AutoInterface unsupported"),
-                CfgIfaceType::Unsupported => log::warn!("rnsh: skipping unsupported interface"),
+                CfgIfaceType::AutoInterface {} => {
+                    log::warn!("rnsh: interface '{}' AutoInterface unsupported", iface.name)
+                }
+                CfgIfaceType::Unsupported => {
+                    log::warn!("rnsh: skipping unsupported interface '{}'", iface.name)
+                }
             }
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1015,18 +1022,19 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
     drop(lk); // release mutex before forking
 
     let pty = openpty(None, None)?;
+    // `master` and `slave` are raw fds (plain i32s), not owned descriptors,
+    // so they own nothing and their lifetime is managed manually with
+    // libc::close() below — in both the parent and the forked child.
     let master = pty.master;
     let slave = pty.slave;
     let slave_fd = slave.as_raw_fd();
 
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child: child_pid }) => {
-            drop(slave);
             let master_fd = master.as_raw_fd();
             unsafe {
                 libc::fcntl(master_fd, libc::F_SETFL, libc::O_NONBLOCK | libc::O_RDWR);
             }
-            std::mem::forget(master);
             let thread_fd = unsafe { libc::dup(master_fd) };
 
             let lo = link_out.clone();
@@ -1074,6 +1082,11 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
             let mut child_exited = false;
             let mut child_code = -1;
             let mut child_detect = Instant::now();
+            // The master fd is closed exactly once: either when the peer
+            // signals stdin EOF, or during cleanup, whichever comes first.
+            // Closing it twice would risk closing a descriptor the kernel has
+            // already recycled for another purpose.
+            let mut master_closed = false;
             while !child_exited || !pty_reader.is_finished() {
                 if pty_reader.is_finished() && child_exited { break; }
                 // Safety: don't wait more than 3 seconds after child exit for PTY drain
@@ -1086,10 +1099,13 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
                             };
                             let data = if ch.payload.len() > 2 { &ch.payload[2..] } else { &[] };
                             let d = if comp { decompress(data, MAX_CHUNK).unwrap_or_default() } else { data.to_vec() };
-                            if sid == SID_STDIN && !d.is_empty() {
+                            if sid == SID_STDIN && !d.is_empty() && !master_closed {
                                 unsafe { libc::write(master_fd, d.as_ptr() as *const libc::c_void, d.len()); }
                             }
-                            if sid == SID_STDIN && eof {
+                            if sid == SID_STDIN && eof && !master_closed {
+                                // Signals EOF to the child; the reader thread
+                                // keeps draining output through its own dup.
+                                master_closed = true;
                                 unsafe { libc::close(master_fd); }
                             }
                         }
@@ -1118,11 +1134,12 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
                 send_channel(&link_out, &transport, MSG_TYPE_CMD_EXITED, &pack_exit(child_code.max(0))).await.ok();
             }
             kill(child_pid, Signal::SIGKILL).ok();
-            unsafe { libc::close(master_fd); }
+            if !master_closed {
+                unsafe { libc::close(master_fd); }
+            }
             transport.link_close(link_id).await.ok();
         }
         Ok(ForkResult::Child) => {
-            drop(master);
             setsid().ok();
             unsafe { libc::ioctl(slave_fd, libc::TIOCSCTTY, 0); }
             dup2(slave_fd, 0).ok();
