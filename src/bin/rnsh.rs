@@ -956,13 +956,38 @@ async fn listener(a: &Args) -> RResult<()> {
 
 /// Do version handshake and exec command exchange on the main loop's
 /// receiver, which was subscribed before any channel messages arrived.
-fn check_allowed(id: &Identity, a: &Args) -> bool {
-    let allowed: HashSet<AddressHash> = a.allowed.iter()
+/// Resolve the configured allow list: `-a` entries plus any
+/// `allowed_identities` file.
+fn allowed_set(a: &Args) -> HashSet<AddressHash> {
+    a.allowed.iter()
         .filter_map(|h| AddressHash::new_from_hex_string(h).ok())
         .chain(load_allowed())
-        .collect();
-    if allowed.is_empty() { return false; }
-    allowed.contains(&id.address_hash)
+        .collect()
+}
+
+/// Whether an identified peer is on the allow list.
+fn check_allowed(id: &AddressHash, allowed: &HashSet<AddressHash>) -> bool {
+    allowed.contains(id)
+}
+
+/// Whether the handshake must wait for an identified, allowed peer before a
+/// command may run.
+///
+/// An allow list is a security boundary, so once one is configured the peer
+/// must identify itself and be on it — identification is not optional. With
+/// no allow list configured the listener is open (as running `rnsh --listen`
+/// with no `-a` implies), and `--no-auth` disables the check outright.
+fn auth_required(a: &Args, allowed: &HashSet<AddressHash>) -> bool {
+    !a.no_auth && !allowed.is_empty()
+}
+
+/// Whether the handshake has everything it needs before a command may run.
+///
+/// `authed` is a full gate, not a hint: a peer that supplies a version and an
+/// exec command but never identifies must not be able to complete the
+/// handshake when an allow list is configured.
+fn handshake_complete(got_ver: bool, got_exec: bool, authed: bool) -> bool {
+    got_ver && got_exec && authed
 }
 
 async fn do_version_handshake(
@@ -979,12 +1004,22 @@ async fn do_version_handshake(
     let mut got_ver = false;
     let mut got_exec = false;
 
+    // Authorization must be settled before the handshake can complete:
+    // otherwise a peer that simply never sends `link_identify` could supply
+    // an exec command and have it run unchecked.
+    let allowed = allowed_set(a);
+    let require_auth = auth_required(a, &allowed);
+    let mut authed = !require_auth;
+
     while Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(500), in_ev.recv()).await {
             Ok(Ok(ev)) if ev.id == *link_id => match &ev.event {
                 LinkEvent::RemoteIdentified(id) => {
-                    if a.no_auth || check_allowed(id, a) {
-                        log::info!("rnsh: remote identified");
+                    if !require_auth {
+                        authed = true;
+                    } else if check_allowed(&id.address_hash, &allowed) {
+                        authed = true;
+                        log::info!("rnsh: remote identified and allowed");
                     } else {
                         send_channel(&link_arc, transport, MSG_TYPE_ERROR, &pack_err("not allowed", true)).await?;
                         bail!("identity not allowed");
@@ -1016,10 +1051,11 @@ async fn do_version_handshake(
             Ok(Err(_)) => bail!("event channel closed"),
             Err(_) => {}
         }
-        if got_ver && got_exec { break; }
+        if handshake_complete(got_ver, got_exec, authed) { break; }
     }
     if !got_ver { bail!("version handshake timeout"); }
     if !got_exec { bail!("exec command timeout"); }
+    if !authed { bail!("peer did not identify itself"); }
 
     // Return raw remote command; handle_link applies overrides/shell
     let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
@@ -1307,6 +1343,49 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn auth_is_required_once_an_allowlist_exists() {
+        let none = HashSet::new();
+        let some: HashSet<AddressHash> = [AddressHash::new_from_hex_string(&"ab".repeat(16)).unwrap()]
+            .into_iter()
+            .collect();
+
+        let mut a = Args::empty();
+
+        // No allow list configured: the listener is open, nothing to enforce.
+        assert!(!auth_required(&a, &none));
+
+        // An allow list makes identification mandatory. This is the property
+        // that was missing: previously a peer could skip `link_identify`
+        // entirely and still have its command executed.
+        assert!(auth_required(&a, &some));
+
+        // --no-auth disables the check even with an allow list present.
+        a.no_auth = true;
+        assert!(!auth_required(&a, &some));
+    }
+
+    #[test]
+    fn handshake_does_not_complete_without_authorization() {
+        // The bypass: version + exec supplied, but the peer never identified.
+        assert!(!handshake_complete(true, true, false));
+        // Every other combination is still incomplete.
+        assert!(!handshake_complete(false, false, false));
+        assert!(!handshake_complete(true, false, true));
+        assert!(!handshake_complete(false, true, true));
+        // Fully satisfied.
+        assert!(handshake_complete(true, true, true));
+    }
+
+    #[test]
+    fn check_allowed_matches_the_resolved_set() {
+        let h = AddressHash::new_from_hex_string(&"ab".repeat(16)).unwrap();
+        let set: HashSet<AddressHash> = [h].into_iter().collect();
+        let other = AddressHash::new_from_hex_string(&"cd".repeat(16)).unwrap();
+        assert!(check_allowed(&h, &set));
+        assert!(!check_allowed(&other, &set));
     }
 
     #[test]
