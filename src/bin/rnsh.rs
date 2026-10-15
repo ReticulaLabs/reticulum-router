@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::env;
-use std::ffi::CString;
+use std::ffi::{CString, OsStr, OsString};
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -12,7 +14,6 @@ use std::time::{Duration, Instant};
 use bzip2::write::BzEncoder;
 use bzip2::read::BzDecoder;
 use bzip2::Compression;
-use libc;
 use nix::pty::openpty;
 use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{tcgetattr, tcsetattr, SetArg, Termios, LocalFlags, InputFlags, OutputFlags, ControlFlags};
@@ -375,6 +376,148 @@ fn compress(buf: &[u8], max: usize) -> (bool, usize, Vec<u8>) {
     (false, plain, buf[..plain].to_vec())
 }
 
+/// A child's `argv`/`envp`, fully built ahead of `fork()`.
+///
+/// The owning `CString`s must outlive the pointer arrays; binding this value
+/// in the enclosing scope keeps them alive for the child after the fork.
+struct ChildExec {
+    /// Program path to hand to `execve`. Already resolved to a full path, so
+    /// the child never has to perform a `PATH` search.
+    prog: CString,
+    // Raw pointers are not `Send`; they are only ever read after `fork()`,
+    // in the child, and never escape this scope.
+    argv: Vec<*const libc::c_char>,
+    envp: Vec<*const libc::c_char>,
+    // Kept alive only so the pointers above stay valid.
+    _args: Vec<CString>,
+    _env: Vec<CString>,
+}
+
+// SAFETY: the raw pointers are derived from `_args`/`_env`, which this struct
+// owns and which are never mutated after construction. They are read exactly
+// once, synchronously, in the forked child between `fork()` and `execvpe()`.
+// Nothing else in the process observes them, so moving the value between
+// threads cannot introduce a data race — the underlying allocations are
+// immutable for the lifetime of the struct.
+unsafe impl Send for ChildExec {}
+
+/// Build the child's `argv`/`envp` before `fork()`.
+///
+/// Everything that allocates, takes a lock, or can panic has to happen on
+/// this side of the fork: only the forking thread survives in the child, so
+/// any other runtime thread holding the allocator or env lock at fork time
+/// would deadlock it. A NUL in a remote-supplied argument is rejected here
+/// (reported cleanly to the peer) rather than panicking inside the child,
+/// where unwinding would run parent destructors and never reach `_exit`.
+/// Note the error type is `String`, not `Box<dyn Error>`: the caller reports
+/// this failure to the peer across an `await`, and the session future must
+/// stay `Send`.
+/// Resolve `prog` to an absolute path, searching `PATH` like `execvp` does.
+///
+/// Done before `fork()` so the child can use plain POSIX `execve`, which is
+/// available everywhere, rather than `execvpe` (a GNU/BSD extension). A name
+/// containing a `/` is used as-is; otherwise each `PATH` entry is tried in
+/// order, and an empty entry means the current directory, per POSIX.
+///
+/// `argv[0]` is left untouched by the caller, so the program still sees the
+/// name the user typed.
+fn resolve_program(prog: &CString, path: Option<&str>) -> Result<CString, String> {
+    let name = prog.as_bytes();
+    if name.contains(&b'/') {
+        return Ok(prog.clone());
+    }
+    // An unset PATH leaves execvp searching a default system path; mirror
+    // that rather than failing outright.
+    let search: Vec<&str> = match path {
+        Some(p) => p.split(':').collect(),
+        None => vec!["/bin", "/usr/bin"],
+    };
+    for dir in search {
+        // POSIX: a zero-length PATH element denotes the working directory.
+        let candidate = if dir.is_empty() {
+            PathBuf::from(".").join(OsStr::from_bytes(name))
+        } else {
+            Path::new(dir).join(OsStr::from_bytes(name))
+        };
+        let Ok(c_candidate) = CString::new(candidate.as_os_str().as_bytes()) else {
+            continue;
+        };
+        // Only accept it if it is actually executable, matching execvp.
+        if unsafe { libc::access(c_candidate.as_ptr(), libc::X_OK) } == 0 {
+            return Ok(c_candidate);
+        }
+    }
+    Err(format!(
+        "command not found: {}",
+        prog.to_string_lossy()
+    ))
+}
+
+/// Build the child's `argv`/`envp` before `fork()`.
+///
+/// Everything that allocates, takes a lock, or can panic has to happen on
+/// this side of the fork: only the forking thread survives in the child, so
+/// any other runtime thread holding the allocator or env lock at fork time
+/// would deadlock it. A NUL in a remote-supplied argument is rejected here
+/// (reported cleanly to the peer) rather than panicking inside the child,
+/// where unwinding would run parent destructors and never reach `_exit`.
+/// Note the error type is `String`, not `Box<dyn Error>`: the caller reports
+/// this failure to the peer across an `await`, and the session future must
+/// stay `Send`.
+fn build_child_exec(cmd: &[String], term: Option<&str>) -> Result<ChildExec, String> {
+    let mut args: Vec<CString> = Vec::with_capacity(cmd.len());
+    for a in cmd {
+        args.push(
+            CString::new(a.as_bytes())
+                .map_err(|_| format!("argument contains a NUL byte: {a:?}"))?,
+        );
+    }
+    if args.is_empty() {
+        return Err("no command to execute".to_string());
+    }
+
+    // Resolve the program to a full path here rather than relying on `PATH`
+    // lookup at exec time: `execvpe` is a GNU/BSD extension that is not
+    // available on every Unix, and doing the search before the fork keeps the
+    // child down to a plain POSIX `execve`.
+    let env_path: Option<String> = std::env::var("PATH").ok();
+    let prog = resolve_program(&args[0], env_path.as_deref())?;
+
+    // Apply TERM by building a new environment rather than calling
+    // `std::env::set_var`, which locks the process-global env mutex.
+    let mut env: Vec<CString> = Vec::new();
+    let mut term_set = false;
+    for (k, v) in std::env::vars_os() {
+        if term.is_some() && k == "TERM" {
+            continue; // replaced below by the requested value
+        }
+        let mut kv = OsString::from(k);
+        kv.push("=");
+        kv.push(v);
+        if let Ok(kv) = CString::new(kv.as_os_str().as_bytes()) {
+            env.push(kv);
+        }
+    }
+    if let Some(t) = term {
+        let mut kv = OsString::from("TERM=");
+        kv.push(t);
+        match CString::new(kv.as_os_str().as_bytes()) {
+            Ok(kv) => {
+                env.push(kv);
+                term_set = true;
+            }
+            Err(_) => return Err("TERM contains a NUL byte".to_string()),
+        }
+    }
+    let _ = term_set;
+
+    let mut argv: Vec<*const libc::c_char> = args.iter().map(|c| c.as_ptr()).collect();
+    argv.push(std::ptr::null());
+    let mut envp: Vec<*const libc::c_char> = env.iter().map(|c| c.as_ptr()).collect();
+    envp.push(std::ptr::null());
+    Ok(ChildExec { prog, argv, envp, _args: args, _env: env })
+}
+
 fn decompress(data: &[u8], max: usize) -> RResult<Vec<u8>> {
     // Bound the output while decoding rather than after: `take` stops the
     // decoder once the limit is reached, so a small but highly compressible
@@ -391,14 +534,21 @@ fn decompress(data: &[u8], max: usize) -> RResult<Vec<u8>> {
 
 // ── Terminal ────────────────────────────────────────────────────────
 
-#[repr(C)]
-struct WinSz { row: u16, col: u16, xpix: u16, ypix: u16 }
-
+/// Use `libc::winsize` rather than a hand-rolled `#[repr(C)]` struct: the
+/// field types are `c_ushort` everywhere, but their width and ordering are
+/// part of the ABI and are guaranteed correct by the bindings.
 fn winsz(fd: RawFd) -> (u16, u16, u16, u16) {
-    let mut ws: WinSz = unsafe { std::mem::zeroed() };
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws as *mut _) } == 0 {
-        (ws.row, ws.col, ws.xpix, ws.ypix)
+        (ws.ws_row, ws.ws_col, ws.ws_xpixel, ws.ws_ypixel)
     } else { (24, 80, 0, 0) }
+}
+
+/// Notify the foreground process group of a terminal size change, so
+/// full-screen programs on the remote end react to a resize.
+fn set_winsize(fd: RawFd, rows: u16, cols: u16) {
+    let ws = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+    unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &ws as *const _) };
 }
 
 // ── Escape sequences ──────────────────────────────────────────────
@@ -1100,6 +1250,19 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
     let transport_out = transport.clone();
     drop(lk); // release mutex before forking
 
+    // Everything the child needs from argv/env is built here, before the fork:
+    // after `fork()` only the forking thread exists, so any allocation or
+    // lock taken in the child can deadlock against a thread that held it at
+    // fork time. Reporting a bad command here also avoids panicking inside
+    // the child, where unwinding would run parent destructors.
+    let exec = match build_child_exec(&cmd, term.as_deref()) {
+        Ok(e) => e,
+        Err(msg) => {
+            send_channel(&link_out, &transport, MSG_TYPE_ERROR, &pack_err(&msg, true)).await.ok();
+            return Err(msg.into());
+        }
+    };
+
     let pty = openpty(None, None)?;
     // `master` and `slave` are raw fds (plain i32s), not owned descriptors,
     // so they own nothing and their lifetime is managed manually with
@@ -1132,8 +1295,10 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
                     } else if n == 0 {
                         break;
                     } else {
-                        let err = unsafe { *libc::__errno_location() };
-                        if err == libc::EAGAIN || err == libc::EWOULDBLOCK {
+                        // `std::io::Error::last_os_error` rather than `__errno_location`,
+// which is glibc-specific and not available on other Unixes.
+                        let err = std::io::Error::last_os_error();
+                        if err.kind() == std::io::ErrorKind::WouldBlock {
                             std::thread::sleep(Duration::from_millis(10));
                         } else {
                             break;
@@ -1220,21 +1385,23 @@ async fn handle_link(link_id: AddressHash, transport: Arc<Transport>, a: &Args,
             transport.link_close(link_id).await.ok();
         }
         Ok(ForkResult::Child) => {
+            // Only async-signal-safe calls from here to `execve`:
+            // setsid/ioctl/dup2/close/execve/_exit. No allocation, no
+            // logging, no panics, no PATH search — all of that happened
+            // before the fork.
             setsid().ok();
             unsafe { libc::ioctl(slave_fd, libc::TIOCSCTTY, 0); }
             dup2(slave_fd, 0).ok();
             dup2(slave_fd, 1).ok();
             dup2(slave_fd, 2).ok();
             if slave_fd > 2 { unsafe { libc::close(slave_fd); } }
-            if let Some(ref t) = term { unsafe { env::set_var("TERM", t); } }
-            let ws = WinSz { row: rows, col: cols, xpix: 0, ypix: 0 };
-            unsafe { libc::ioctl(0, libc::TIOCSWINSZ, &ws as *const _); }
-            let prog = CString::new(cmd[0].as_bytes()).unwrap();
-            let args: Vec<CString> = cmd.iter().map(|s| CString::new(s.as_bytes()).unwrap()).collect();
-            let mut ptrs: Vec<*const libc::c_char> = args.iter().map(|c| c.as_ptr()).collect();
-            ptrs.push(std::ptr::null());
-            unsafe { libc::execvp(prog.as_ptr(), ptrs.as_ptr()); }
-            unsafe { libc::_exit(255); }
+            // Do not leak the pty master into the program we are about to run.
+            unsafe { libc::close(master.as_raw_fd()); }
+            set_winsize(0, rows, cols);
+            // Plain `execve`: `prog` is already resolved and `envp` already
+            // carries the requested TERM.
+            unsafe { libc::execve(exec.prog.as_ptr(), exec.argv.as_ptr(), exec.envp.as_ptr()); }
+            unsafe { libc::_exit(127); }
         }
         Err(e) => bail!("fork: {e}"),
     }
@@ -1371,6 +1538,91 @@ mod tests {
         // --no-auth disables the check even with an allow list present.
         a.no_auth = true;
         assert!(!auth_required(&a, &some));
+    }
+
+    #[test]
+    fn child_exec_rejects_nul_in_arguments() {
+        // Must be reported, not panic: this used to `unwrap()` inside the
+        // forked child, where unwinding would run parent destructors.
+        let cmd = vec!["sh".to_string(), "echo\0hi".to_string()];
+        let err = match build_child_exec(&cmd, None) {
+            Err(e) => e,
+            Ok(_) => panic!("a NUL byte in an argument must be rejected"),
+        };
+        assert!(err.contains("NUL"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn resolve_program_uses_path() {
+        // A bare name is resolved against PATH, with an X_OK check.
+        let sh = CString::new("sh").unwrap();
+        let resolved = resolve_program(&sh, Some("/bin:/usr/bin")).unwrap();
+        let s = resolved.to_string_lossy().into_owned();
+        assert!(s.ends_with("/sh"), "expected a full path, got {s}");
+        assert!(s.starts_with("/"), "expected an absolute path, got {s}");
+        assert!(Path::new(&s).is_absolute());
+    }
+
+    #[test]
+    fn resolve_program_keeps_explicit_paths() {
+        // Anything containing a '/' is used verbatim, without a PATH search.
+        let p = CString::new("/bin/sh").unwrap();
+        assert_eq!(resolve_program(&p, Some("/nonexistent")).unwrap(), p);
+        let rel = CString::new("./local-tool").unwrap();
+        assert_eq!(resolve_program(&rel, Some("/nonexistent")).unwrap(), rel);
+    }
+
+    #[test]
+    fn resolve_program_reports_missing_command() {
+        let p = CString::new("definitely-not-a-real-binary-xyz").unwrap();
+        let err = resolve_program(&p, Some("/bin:/usr/bin")).unwrap_err();
+        assert!(err.contains("command not found"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn resolve_program_falls_back_when_path_unset() {
+        // An unset PATH must not be treated as "no directories to search".
+        let sh = CString::new("sh").unwrap();
+        let resolved = resolve_program(&sh, None).unwrap();
+        assert!(resolved.to_string_lossy().ends_with("/sh"));
+    }
+
+    #[test]
+    fn child_exec_builds_argv_and_envp() {
+        let cmd = vec!["sh".to_string(), "-c".to_string(), "echo hi".to_string()];
+        let e = build_child_exec(&cmd, Some("xterm-256color")).unwrap();
+
+        // argv: program + args, then the NULL terminator.
+        assert_eq!(e.argv.len(), 4);
+        assert_eq!(e._args.len(), 3);
+        assert_eq!(unsafe { *e.argv[0] } as u8, b's');
+        assert!(e.argv[3].is_null());
+
+        // envp carries the requested TERM and is NULL terminated.
+        assert!(e.envp.last().unwrap().is_null());
+        let env: Vec<String> = e
+            ._env
+            .iter()
+            .map(|c| unsafe { std::ffi::CStr::from_ptr(c.as_ptr()) }.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(env.iter().filter(|v| *v == "TERM=xterm-256color").count(), 1);
+        assert!(!env.iter().any(|v| v == "TERM" ));
+    }
+
+    #[test]
+    fn child_exec_without_term_passes_env_through() {
+        let cmd = vec!["true".to_string()];
+        let e = build_child_exec(&cmd, None).unwrap();
+        assert_eq!(e.argv.len(), 2);
+        assert!(e.argv[1].is_null());
+        // Inherited environment is still forwarded, just without an override.
+        assert!(!e.envp.is_empty());
+        assert!(e.envp.last().unwrap().is_null());
+    }
+
+    #[test]
+    fn child_exec_rejects_empty_command() {
+        assert!(build_child_exec(&[], None).is_err());
     }
 
     /// Compress `data` the same way the peer would.
