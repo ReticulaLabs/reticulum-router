@@ -432,7 +432,7 @@ impl Daemon {
                     lora_config.reset_line = reset_line;
                     lora_config.dio1_line = dio1_line;
                     lora_config.sync_word = sync_word;
-                    lora_config.preamble_length = preamble_length;
+                    lora_config.preamble_length = Some(preamble_length);
                     lora_config.crc_enabled = crc_enabled;
                     lora_config.implicit_header = implicit_header;
                     lora_config.iq_inverted = iq_inverted;
