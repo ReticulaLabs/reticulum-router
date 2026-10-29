@@ -16,8 +16,8 @@ use super::client::Client;
 use super::config::{Cfg, APP_ASPECT, APP_NAME};
 use super::gitutil::{self, TempDir};
 use super::server::Rngit;
-use super::transfer::{PATH_CREATE, PATH_DELETE, PATH_FETCH, PATH_PUSH};
-use super::{check_ok, fetch_request, ls_remote_refs, push_request};
+use super::transfer::{PATH_CREATE, PATH_DELETE, PATH_FETCH, PATH_PUSH, PATH_REPOS};
+use super::{check_ok, fetch_request, ls_remote_refs, parse_repos_response, push_request, repos_request, response_bytes};
 
     fn make_identity() -> PrivateIdentity {
         let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
@@ -120,6 +120,28 @@ use super::{check_ok, fetch_request, ls_remote_refs, push_request};
             .await
             .unwrap();
         check_ok(resp, "create").unwrap();
+
+        // Repository listing shows the new repository, both globally and
+        // when filtered to its group.
+        for group in [None, Some("public")] {
+            let resp = client
+                .request(PATH_REPOS, repos_request(group), Duration::from_secs(30))
+                .await
+                .unwrap();
+            let repos = parse_repos_response(&response_bytes(resp).unwrap()).unwrap();
+            assert_eq!(repos, vec![repo_path.to_string()], "group filter {group:?}");
+        }
+
+        // Unknown groups are reported as not found.
+        let resp = client
+            .request(
+                PATH_REPOS,
+                repos_request(Some("missing")),
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap();
+        assert!(!resp_matches(resp, &[0x00]), "unknown group should fail");
 
         // ls-remote on the fresh repository: no refs.
         let remote = ls_remote_refs(&mut client, repo_path, false)
@@ -276,4 +298,20 @@ use super::{check_ok, fetch_request, ls_remote_refs, push_request};
 
         assert!(super::client::parse_rns_url("rns://short/group/repo").is_err());
         assert!(super::client::parse_rns_url("rns://0123456789abcdef0123456789abcdef").is_err());
+    }
+
+    #[test]
+    fn parse_repos_url() {
+        let hash = "ab".repeat(16);
+        let (h, group) = super::client::parse_rns_repos_url(&format!("rns://{hash}")).unwrap();
+        assert_eq!(h.to_hex_string(), hash);
+        assert_eq!(group, None);
+
+        let (h, group) =
+            super::client::parse_rns_repos_url(&format!("rns://{hash}/public/")).unwrap();
+        assert_eq!(h.to_hex_string(), hash);
+        assert_eq!(group.as_deref(), Some("public"));
+
+        assert!(super::client::parse_rns_repos_url("rns://short").is_err());
+        assert!(super::client::parse_rns_repos_url(&format!("rns://{hash}/a/b")).is_err());
     }

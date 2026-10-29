@@ -38,7 +38,7 @@ mod e2e;
 use client::{Client, ClientResponse};
 use config::{APP_ASPECT, APP_NAME, DEFAULT_ANNOUNCE};
 use server::Rngit;
-use transfer::{PATH_DELETE, PATH_FETCH, PATH_LIST, PATH_PUSH};
+use transfer::{PATH_DELETE, PATH_FETCH, PATH_LIST, PATH_PUSH, PATH_REPOS};
 
 /// Number of announces sent at startup so late-subscribing peers can
 /// discover this destination and resolve its identity for link crypto.
@@ -176,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
         Some("ls-remote") => cmd_ls_remote(&args).await,
+        Some("ls-repos") => cmd_ls_repos(&args).await,
         Some("clone") => cmd_clone(&args).await,
         Some("push") => cmd_push(&args).await,
         Some("delete") => cmd_delete(&args).await,
@@ -192,11 +193,13 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  rngit                       Run the repository server");
     eprintln!("  rngit ls-remote <url>       List refs of a remote repository");
+    eprintln!("  rngit ls-repos <url>        List repositories on a remote server");
     eprintln!("  rngit clone <url> [dir]     Clone a remote repository");
     eprintln!("  rngit push [--force] <dir> <url>");
     eprintln!("                              Push local refs to a remote repository");
     eprintln!("  rngit delete <url> <ref>    Delete a ref on a remote repository\n");
     eprintln!("<url> is rns://<destination_hash>/<group>/<repository>\n");
+    eprintln!("ls-repos also accepts rns://<destination_hash>[/<group>]\n");
     eprintln!("Server options:");
     eprintln!("  -b, --announce <sec>       Announce interval in seconds (default: {DEFAULT_ANNOUNCE}, 0 disables)");
 }
@@ -284,6 +287,15 @@ fn list_request(repo: &str, for_push: bool) -> Value {
     ])
 }
 
+/// Build the `/git/repos` request payload. An empty map lists all groups.
+fn repos_request(group: Option<&str>) -> Value {
+    let mut entries = Vec::new();
+    if let Some(group) = group {
+        entries.push((Value::from("group"), Value::from(group)));
+    }
+    Value::Map(entries)
+}
+
 /// Build the `/git/fetch` request payload for the given refs.
 fn fetch_request(repo: &str, refs: &[(String, String)]) -> Value {
     let ref_array: Vec<Value> = refs
@@ -356,6 +368,21 @@ fn parse_list_response(bytes: &[u8]) -> Result<RemoteRefs, Box<dyn std::error::E
     Ok(RemoteRefs { refs, head })
 }
 
+/// Parse the `/git/repos` response payload (one `group/repository` per line).
+fn parse_repos_response(bytes: &[u8]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    if bytes.first() != Some(&0x00) {
+        let code = bytes.first().copied().unwrap_or(0);
+        let msg = String::from_utf8_lossy(&bytes[1..]).trim().to_string();
+        return Err(format!("server error {code}: {msg}").into());
+    }
+    Ok(String::from_utf8_lossy(&bytes[1..])
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 fn print_ls_remote(remote: &RemoteRefs) {
     for (sha, refname) in &remote.refs {
         println!("{sha}\t{refname}");
@@ -396,6 +423,26 @@ async fn cmd_ls_remote(args: &[String]) -> Result<(), Box<dyn std::error::Error>
     let mut c = Client::connect(transport, &identity, hash, client::CONNECT_TIMEOUT).await?;
     let remote = ls_remote_refs(&mut c, &repo, false).await?;
     print_ls_remote(&remote);
+    Ok(())
+}
+
+async fn cmd_ls_repos(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let url = args
+        .get(2)
+        .ok_or("usage: rngit ls-repos <rns://hash[/group]>")?;
+    let (hash, group) = client::parse_rns_repos_url(url)?;
+    let (transport, identity) = client_setup().await?;
+    let mut c = Client::connect(transport, &identity, hash, client::CONNECT_TIMEOUT).await?;
+    let resp = c
+        .request(
+            PATH_REPOS,
+            repos_request(group.as_deref()),
+            client::REQUEST_TIMEOUT,
+        )
+        .await?;
+    for repo in parse_repos_response(&response_bytes(resp)?)? {
+        println!("{repo}");
+    }
     Ok(())
 }
 

@@ -23,6 +23,7 @@ pub const IDX_REPOSITORY: i64 = 0x00;
 pub const IDX_RESULT_CODE: i64 = 0x01;
 
 pub const PATH_LIST: &str = "/git/list";
+pub const PATH_REPOS: &str = "/git/repos";
 pub const PATH_FETCH: &str = "/git/fetch";
 pub const PATH_PUSH: &str = "/git/push";
 pub const PATH_DELETE: &str = "/git/delete";

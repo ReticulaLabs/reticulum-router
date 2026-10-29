@@ -423,16 +423,48 @@ pub fn parse_rns_url(url: &str) -> TResult<(AddressHash, String)> {
     if parts.next().is_some() {
         return Err("invalid rns url: too many path components".into());
     }
+    let hash = parse_destination_hash(hash_hex)?;
+    if group.is_empty() || repo.is_empty() {
+        return Err("invalid rns url: missing group or repository".into());
+    }
+    Ok((hash, format!("{group}/{repo}")))
+}
+
+/// Parse an `rns://` URL for repository listing into `(hash, group)`.
+///
+/// Accepted forms:
+/// - `rns://<hex_hash>` (all groups)
+/// - `rns://<hex_hash>/<group>` (one group)
+///
+/// Only used by the `rngit` client; the shared module is also compiled into
+/// the `git-remote-rns` helper.
+#[allow(dead_code)]
+pub fn parse_rns_repos_url(url: &str) -> TResult<(AddressHash, Option<String>)> {
+    let rest = url
+        .strip_prefix("rns://")
+        .or_else(|| url.strip_prefix("rns:"))
+        .unwrap_or(url)
+        .trim_end_matches('/');
+    let mut parts = rest.split('/');
+    let hash_hex = parts.next().ok_or("invalid rns url")?;
+    let group = match parts.next() {
+        None | Some("") => None,
+        Some(group) => Some(group.to_string()),
+    };
+    if parts.next().is_some() {
+        return Err("invalid rns url: too many path components".into());
+    }
+    let hash = parse_destination_hash(hash_hex)?;
+    Ok((hash, group))
+}
+
+fn parse_destination_hash(hash_hex: &str) -> TResult<AddressHash> {
     if hash_hex.len() != ADDRESS_HASH_SIZE * 2 {
         return Err(format!(
             "destination must be {} hex chars",
             ADDRESS_HASH_SIZE * 2
         ));
     }
-    let hash = AddressHash::new_from_hex_string(hash_hex)
-        .map_err(|_| "invalid destination hash".to_string())?;
-    if group.is_empty() || repo.is_empty() {
-        return Err("invalid rns url: missing group or repository".into());
-    }
-    Ok((hash, format!("{group}/{repo}")))
+    AddressHash::new_from_hex_string(hash_hex)
+        .map_err(|_| "invalid destination hash".to_string())
 }

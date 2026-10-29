@@ -387,6 +387,7 @@ impl Rngit {
     ) -> TResult<Response> {
         let path = match path_hash {
             p if p == transfer::path_hash(transfer::PATH_LIST).as_slice() => transfer::PATH_LIST,
+            p if p == transfer::path_hash(transfer::PATH_REPOS).as_slice() => transfer::PATH_REPOS,
             p if p == transfer::path_hash(transfer::PATH_FETCH).as_slice() => transfer::PATH_FETCH,
             p if p == transfer::path_hash(transfer::PATH_PUSH).as_slice() => transfer::PATH_PUSH,
             p if p == transfer::path_hash(transfer::PATH_DELETE).as_slice() => transfer::PATH_DELETE,
@@ -397,6 +398,10 @@ impl Rngit {
         match path {
             transfer::PATH_LIST => {
                 let response = self.handle_list(peer, &data);
+                Ok(Response::Bytes(response))
+            }
+            transfer::PATH_REPOS => {
+                let response = self.handle_repos(peer, &data);
                 Ok(Response::Bytes(response))
             }
             transfer::PATH_FETCH => {
@@ -583,6 +588,61 @@ impl Rngit {
             }
             Err(_) => Self::error_response(transfer::RES_REMOTE_FAIL, "Could not list refs"),
         }
+    }
+
+    /// List repositories the requesting identity may read.
+    ///
+    /// Accepts an optional `group` key to restrict the listing to one group.
+    /// The response is `RES_OK` followed by one `group/repository` per line,
+    /// sorted for stable output.
+    fn handle_repos(&self, peer: Option<[u8; ADDRESS_HASH_SIZE]>, data: &Value) -> Vec<u8> {
+        let Some(peer) = peer else {
+            return Self::not_identified();
+        };
+        let group_filter = data
+            .as_map()
+            .and_then(|m| m.iter().find(|(k, _)| k.as_str() == Some("group")))
+            .and_then(|(_, v)| v.as_str())
+            .filter(|g| !g.is_empty());
+
+        if let Some(group) = group_filter
+            && !self.cfg.repositories.contains_key(group)
+        {
+            return Self::error_response(transfer::RES_NOT_FOUND, "Not found");
+        }
+
+        let mut repositories: Vec<String> = Vec::new();
+        for (group, group_path) in &self.cfg.repositories {
+            if group_filter.is_some_and(|g| g != group) {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(group_path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                    continue;
+                };
+                if !gitutil::is_repository(&entry.path()) {
+                    continue;
+                }
+                if !self.resolve_perm(peer, group, &name, Perm::Read) {
+                    continue;
+                }
+                repositories.push(format!("{group}/{name}"));
+            }
+        }
+        repositories.sort();
+
+        let mut response = vec![transfer::RES_OK];
+        for repo in repositories {
+            response.extend_from_slice(repo.as_bytes());
+            response.push(b'\n');
+        }
+        response
     }
 
     async fn handle_fetch(

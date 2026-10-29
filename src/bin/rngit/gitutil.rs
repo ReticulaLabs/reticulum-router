@@ -91,6 +91,11 @@ pub fn repo_dir(group_path: &Path, repo: &str) -> Option<PathBuf> {
     Some(joined)
 }
 
+/// True if `path` looks like a bare git repository.
+pub fn is_repository(repo_path: &Path) -> bool {
+    repo_path.join("HEAD").is_file() && repo_path.join("objects").is_dir()
+}
+
 /// Parse a "group/repo" request repository path.
 pub fn parse_request_repository_path(path: &str) -> Option<(&str, &str)> {
     let mut comps = path.splitn(3, '/');
