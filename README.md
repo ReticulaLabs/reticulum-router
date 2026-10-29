@@ -36,6 +36,9 @@ Reticulum is a mesh network protocol, originally developed by [Mark Qvist in Pyt
   * Probably a horrific idea
 * `rnsniff` - Reticulum announcement sniffer.
   * Listens for raw announcements on the network and attempt to decode them
+* `rnguard` - Announce-rate watchdog
+  * Counts announces per destination over the instance RPC event stream and blackholes any destination announcing more than 50 times an hour
+  * Interface fan-out for a single announce is coalesced (`-c`, default 30s) so one logical announce is not counted once per link
 * `rngit` - Experimental git server / client over reticulum
   * Work in progress, not ready for use yet
 
