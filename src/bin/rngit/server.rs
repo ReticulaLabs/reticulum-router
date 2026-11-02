@@ -543,6 +543,53 @@ impl Rngit {
         resolve_group_permission(&group_lists, &peer, perm)
     }
 
+    /// True when the group exists but the repository directory does not.
+    fn repo_missing(&self, group: &str, repo: &str) -> bool {
+        let Some(group_path) = self.cfg.repositories.get(group) else {
+            return false;
+        };
+        let group_path = PathBuf::from(group_path);
+        if !group_path.is_dir() {
+            return false;
+        }
+        match gitutil::repo_dir(&group_path, repo) {
+            Some(repo_path) => !repo_path.exists(),
+            None => false,
+        }
+    }
+
+    /// Create a missing repository for a push, provided the identity holds
+    /// the create permission on the group. Returns true only when the
+    /// repository was created for this push.
+    fn create_repo_on_push(
+        &self,
+        peer: [u8; ADDRESS_HASH_SIZE],
+        group: &str,
+        repo: &str,
+    ) -> bool {
+        if !self.repo_missing(group, repo) {
+            return false;
+        }
+        if !self.resolve_group_perm(peer, group, Perm::Create) {
+            return false;
+        }
+        let Some(group_path) = self.cfg.repositories.get(group) else {
+            return false;
+        };
+        let group_path = PathBuf::from(group_path);
+        let creator_hash = hex::encode(peer);
+        match gitutil::create_repository(&group_path, repo, &creator_hash) {
+            Ok(()) => {
+                log::info!("rngit: created repository {group}/{repo} on first push");
+                true
+            }
+            Err(e) => {
+                log::error!("rngit: create repository {group}/{repo} on first push failed: {e}");
+                false
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // Handlers
     // ------------------------------------------------------------------
@@ -569,6 +616,17 @@ impl Rngit {
         let access = if for_push { write } else { read };
 
         if !access {
+            // A first push to a repository that does not exist yet is
+            // allowed when the identity may create repositories in this
+            // group. Report an empty ref list so the client sends the
+            // initial bundle; handle_push() will create the repository.
+            if for_push
+                && self.repo_missing(group, repo)
+                && self.resolve_group_perm(peer, group, Perm::Create)
+            {
+                return vec![transfer::RES_OK];
+            }
+
             return if read {
                 Self::error_response(transfer::RES_NOT_FOUND, "Not allowed")
             } else {
@@ -809,11 +867,17 @@ impl Rngit {
         let write = self.resolve_perm(peer, group, repo, Perm::Write);
 
         if !write {
-            return if read {
-                Self::error_response(transfer::RES_DISALLOWED, "Not allowed")
-            } else {
-                Self::error_response(transfer::RES_NOT_FOUND, "Not found")
-            };
+            // Create the repository on its first push when the identity
+            // has create permission for the group. The creator is added
+            // to the repository's admin list, so this same push can
+            // proceed with write access.
+            if !self.create_repo_on_push(peer, group, repo) {
+                return if read {
+                    Self::error_response(transfer::RES_DISALLOWED, "Not allowed")
+                } else {
+                    Self::error_response(transfer::RES_NOT_FOUND, "Not found")
+                };
+            }
         }
 
         let Some((repo_path, _, _)) = self.resolve_repo_access(group, repo) else {

@@ -16,7 +16,7 @@ use super::client::Client;
 use super::config::{Cfg, APP_ASPECT, APP_NAME};
 use super::gitutil::{self, TempDir};
 use super::server::Rngit;
-use super::transfer::{PATH_CREATE, PATH_DELETE, PATH_FETCH, PATH_PUSH, PATH_REPOS};
+use super::transfer::{PATH_CREATE, PATH_DELETE, PATH_FETCH, PATH_LIST, PATH_PUSH, PATH_REPOS};
 use super::{check_ok, fetch_request, ls_remote_refs, parse_repos_response, push_request, repos_request, response_bytes};
 
     fn make_identity() -> PrivateIdentity {
@@ -111,10 +111,10 @@ use super::{check_ok, fetch_request, ls_remote_refs, parse_repos_response, push_
         .await
         .unwrap_or_else(|e| panic!("connect failed: {e}"));
 
-        let repo_path = "public/testrepo";
+        let explicit_repo = "public/testrepo";
 
-        // Create the repository.
-        let create_data = Value::Map(vec![(Value::from(0i64), Value::from(repo_path))]);
+        // Create a repository explicitly.
+        let create_data = Value::Map(vec![(Value::from(0i64), Value::from(explicit_repo))]);
         let resp = client
             .request(PATH_CREATE, create_data, Duration::from_secs(30))
             .await
@@ -129,8 +129,23 @@ use super::{check_ok, fetch_request, ls_remote_refs, parse_repos_response, push_
                 .await
                 .unwrap();
             let repos = parse_repos_response(&response_bytes(resp).unwrap()).unwrap();
-            assert_eq!(repos, vec![repo_path.to_string()], "group filter {group:?}");
+            assert_eq!(
+                repos,
+                vec![explicit_repo.to_string()],
+                "group filter {group:?}"
+            );
         }
+
+        // A repository that does not exist yet can be created implicitly
+        // by its first push, since the group grants create permission.
+        let repo_path = "public/firstpush";
+        let remote = ls_remote_refs(&mut client, repo_path, true)
+            .await
+            .unwrap();
+        assert!(
+            remote.refs.is_empty(),
+            "first push should start from an empty ref list"
+        );
 
         // Unknown groups are reported as not found.
         let resp = client
@@ -143,11 +158,20 @@ use super::{check_ok, fetch_request, ls_remote_refs, parse_repos_response, push_
             .unwrap();
         assert!(!resp_matches(resp, &[0x00]), "unknown group should fail");
 
-        // ls-remote on the fresh repository: no refs.
-        let remote = ls_remote_refs(&mut client, repo_path, false)
+        // A read-only listing of a repository that does not exist yet must
+        // still fail; implicit creation applies to pushes only.
+        let resp = client
+            .request(
+                PATH_LIST,
+                super::list_request(repo_path, false),
+                Duration::from_secs(30),
+            )
             .await
             .unwrap();
-        assert!(remote.refs.is_empty(), "expected no refs, got {:?}", remote.refs);
+        assert!(
+            !resp_matches(resp, &[0x00]),
+            "missing repository should not be readable"
+        );
 
         // Build a local repository with a large, incompressible file so the
         // push bundle forces a resource transfer.
