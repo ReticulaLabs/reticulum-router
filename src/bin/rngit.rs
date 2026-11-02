@@ -205,6 +205,10 @@ fn print_usage() {
 }
 
 async fn server_main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Err(e) = gitutil::ensure_git_available() {
+        return Err(format!("rngit: {e}").into());
+    }
+
     let mut cfg = config::load_cfg(None);
 
     let args: Vec<String> = std::env::args().skip(1).collect();

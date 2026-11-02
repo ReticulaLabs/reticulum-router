@@ -4,6 +4,20 @@ use std::process::Command;
 
 pub type GResult<T> = Result<T, String>;
 
+/// Verify that the `git` executable is available. The server shells out to
+/// git for every repository operation, so fail fast with a clear message
+/// instead of only erroring on the first create/list/push.
+pub fn ensure_git_available() -> GResult<()> {
+    match Command::new("git").arg("--version").output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            Err(format!("git is not usable: {}", stderr.trim()))
+        }
+        Err(e) => Err(format!("git is not installed or not in PATH: {e}")),
+    }
+}
+
 /// Validate a ref name, mirroring the Python reference.
 pub fn san_ref(ref_name: &str) -> Option<&str> {
     if ref_name.starts_with('-') {
@@ -379,9 +393,19 @@ pub fn create_repository(group_path: &Path, repo_name: &str, creator_hash: &str)
     let init = git(&repo_path, &["init", "--bare"]);
     match init {
         Ok(out) if out.status.success() => {}
-        _ => {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let stderr = stderr.trim();
             let _ = std::fs::remove_dir_all(&repo_path);
-            return Err("could not initialize repository".into());
+            return Err(if stderr.is_empty() {
+                format!("could not initialize repository: git init --bare exited with {}", out.status)
+            } else {
+                format!("could not initialize repository: {stderr}")
+            });
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&repo_path);
+            return Err(format!("could not initialize repository: {e}"));
         }
     }
 
