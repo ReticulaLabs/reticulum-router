@@ -908,6 +908,36 @@ impl McpServer {
             output.push_str(&format!("  Last RSSI: {rssi_v} dBm\n"));
         }
 
+        // Per-interface traffic counters
+        let ifstats = self.rpc.send_rpc(&Value::Map(vec![
+            (Value::from("get"), Value::from("interface_stats")),
+        ]))?;
+        if let Some(map) = ifstats.as_map() {
+            let total_rxb = map_get_u64(map, "rxb").unwrap_or(0);
+            let total_txb = map_get_u64(map, "txb").unwrap_or(0);
+            output.push_str(&format!(
+                "  Total traffic: rx {total_rxb} bytes, tx {total_txb} bytes\n"
+            ));
+
+            if let Some(interfaces) = map_get_value(map, "interfaces").and_then(|v| v.as_array()) {
+                output.push_str("  Interfaces:\n");
+                for entry in interfaces {
+                    let Some(iface) = entry.as_map() else {
+                        continue;
+                    };
+                    let name = map_get_str(iface, "name").unwrap_or("(unnamed)");
+                    let addr = map_get_str(iface, "address").unwrap_or("?");
+                    let packets_rx = map_get_u64(iface, "packets_rx").unwrap_or(0);
+                    let packets_tx = map_get_u64(iface, "packets_tx").unwrap_or(0);
+                    let bytes_rx = map_get_u64(iface, "rxb").unwrap_or(0);
+                    let bytes_tx = map_get_u64(iface, "txb").unwrap_or(0);
+                    output.push_str(&format!(
+                        "    {name} [{addr}]: rx {packets_rx} pkt / {bytes_rx} B, tx {packets_tx} pkt / {bytes_tx} B\n"
+                    ));
+                }
+            }
+        }
+
         Ok(output)
     }
 
@@ -1168,7 +1198,7 @@ fn list_tools() -> Vec<JsonValue> {
         ]),
         json_obj(&[
             ("name", JsonValue::String("get_metrics".into())),
-            ("description", JsonValue::String("Get a summary of transport metrics including path table size, rate table size, blackhole count, and last signal data.".into())),
+            ("description", JsonValue::String("Get a summary of transport metrics including path table size, rate table size, blackhole count, last signal data, and per-interface RX/TX traffic counters.".into())),
             ("inputSchema", json_obj(&[
                 ("type", JsonValue::String("object".into())),
                 ("properties", json_obj(&[])),
@@ -1254,6 +1284,11 @@ fn extract_id(line: &str) -> Option<JsonValue> {
 }
 
 // ── MessagePack Helpers ──
+
+fn map_get_value<'a>(map: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
+    map.iter()
+        .find_map(|(k, v)| if k.as_str() == Some(key) { Some(v) } else { None })
+}
 
 fn map_get_bytes<'a>(map: &'a [(Value, Value)], key: &str) -> Option<&'a [u8]> {
     map.iter()

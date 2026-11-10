@@ -706,8 +706,33 @@ fn render_prometheus_metrics(
     output.push_str("# TYPE reticulum_transport_interface_tx_queue_length gauge\n");
     output.push_str("# HELP reticulum_transport_interface_announce_queue_length Number of forwarded announces waiting in an interface announce pacer.\n");
     output.push_str("# TYPE reticulum_transport_interface_announce_queue_length gauge\n");
+    output.push_str("# HELP reticulum_transport_interface_packets_received_total Cumulative packets received on an interface.\n");
+    output.push_str("# TYPE reticulum_transport_interface_packets_received_total gauge\n");
+    output.push_str("# HELP reticulum_transport_interface_bytes_received_total Cumulative data bytes received on an interface.\n");
+    output.push_str("# TYPE reticulum_transport_interface_bytes_received_total gauge\n");
+    output.push_str("# HELP reticulum_transport_interface_bytes_sent_total Cumulative data bytes sent through an interface.\n");
+    output.push_str("# TYPE reticulum_transport_interface_bytes_sent_total gauge\n");
 
-    for iface in metrics.interface_queues.interfaces {
+    let total_packets_rx: u64 = metrics
+        .interface_queues
+        .interfaces
+        .iter()
+        .map(|iface| iface.packets_rx)
+        .sum();
+    let total_bytes_rx: u64 = metrics
+        .interface_queues
+        .interfaces
+        .iter()
+        .map(|iface| iface.bytes_rx)
+        .sum();
+    let total_bytes_tx: u64 = metrics
+        .interface_queues
+        .interfaces
+        .iter()
+        .map(|iface| iface.bytes_tx)
+        .sum();
+
+    for iface in &metrics.interface_queues.interfaces {
         let interface = iface.address.to_hex_string();
         let interface_name = interface_names
             .get(&iface.address)
@@ -724,6 +749,18 @@ fn render_prometheus_metrics(
         output.push_str(&format!(
             "reticulum_transport_interface_packets_sent_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
             interface, interface_name, iface.packets_tx
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_interface_packets_received_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.packets_rx
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_interface_bytes_sent_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.bytes_tx
+        ));
+        output.push_str(&format!(
+            "reticulum_transport_interface_bytes_received_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
+            interface, interface_name, iface.bytes_rx
         ));
         output.push_str(&format!(
             "reticulum_transport_interface_pacing_wait_microseconds_total{{interface=\"{}\",interface_name=\"{}\"}} {}\n",
@@ -821,6 +858,27 @@ fn render_prometheus_metrics(
     output.push_str(&format!(
         "reticulum_transport_packets_sent_total {}\n",
         metrics.total_packets_tx
+    ));
+
+    output.push_str("# HELP reticulum_transport_total_packets_received Total number of packets received across all interfaces.\n");
+    output.push_str("# TYPE reticulum_transport_total_packets_received gauge\n");
+    output.push_str(&format!(
+        "reticulum_transport_total_packets_received {}\n",
+        total_packets_rx
+    ));
+
+    output.push_str("# HELP reticulum_transport_total_bytes_received Total number of data bytes received across all interfaces.\n");
+    output.push_str("# TYPE reticulum_transport_total_bytes_received gauge\n");
+    output.push_str(&format!(
+        "reticulum_transport_total_bytes_received {}\n",
+        total_bytes_rx
+    ));
+
+    output.push_str("# HELP reticulum_transport_total_bytes_sent Total number of data bytes sent across all interfaces.\n");
+    output.push_str("# TYPE reticulum_transport_total_bytes_sent gauge\n");
+    output.push_str(&format!(
+        "reticulum_transport_total_bytes_sent {}\n",
+        total_bytes_tx
     ));
 
     output.push_str("# HELP reticulum_transport_pacing_wait_microseconds_total Total microseconds spent waiting for packet pacing across all interfaces.\n");
@@ -970,10 +1028,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{identity_path, load_or_create_identity};
+    use super::{identity_path, load_or_create_identity, render_prometheus_metrics};
+    use reticulum_sdk::hash::AddressHash;
+    use reticulum_sdk::iface::{InterfaceQueueLength, InterfaceQueueLengths};
+    use reticulum_sdk::transport::TransportMetrics;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn prometheus_exposes_interface_rx_and_tx_counters() {
+        let address = AddressHash::new([0x42; 16]);
+        let hex = address.to_hex_string();
+
+        let mut metrics = TransportMetrics::default();
+        metrics.interface_queues = InterfaceQueueLengths {
+            rx: 1,
+            interfaces: vec![InterfaceQueueLength {
+                address,
+                tx: 0,
+                announce: 0,
+                packets_tx: 10,
+                bytes_tx: 1_000,
+                packets_rx: 20,
+                bytes_rx: 2_000,
+                pacing_wait_us: 0,
+                last_pacing_interval_us: 0,
+                channel_load: 0,
+            }],
+        };
+
+        let mut names = HashMap::new();
+        names.insert(address, "peer".to_string());
+
+        let body = render_prometheus_metrics(metrics, Some(0), &names);
+
+        assert!(body.contains(&format!(
+            "reticulum_transport_interface_packets_received_total{{interface=\"{hex}\",interface_name=\"peer\"}} 20"
+        )));
+        assert!(body.contains(&format!(
+            "reticulum_transport_interface_bytes_received_total{{interface=\"{hex}\",interface_name=\"peer\"}} 2000"
+        )));
+        assert!(body.contains(&format!(
+            "reticulum_transport_interface_bytes_sent_total{{interface=\"{hex}\",interface_name=\"peer\"}} 1000"
+        )));
+        assert!(body.contains("reticulum_transport_total_packets_received 20"));
+        assert!(body.contains("reticulum_transport_total_bytes_received 2000"));
+        assert!(body.contains("reticulum_transport_total_bytes_sent 1000"));
+    }
 
     #[test]
     fn creates_and_reuses_identity_file() {
